@@ -1,19 +1,26 @@
 package com.projectforge.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.projectforge.ai.ClarificationEngine;
 import com.projectforge.ai.PromptLoader;
 import com.projectforge.ai.QualityEvaluator;
 import com.projectforge.ai.RequirementAnalyzer;
 import com.projectforge.ai.RequirementValidator;
+import com.projectforge.dto.ApprovalRequest;
+import com.projectforge.dto.ApprovalResponse;
 import com.projectforge.dto.ClarificationAnswerDto;
 import com.projectforge.dto.ClarificationRequest;
+import com.projectforge.dto.ProjectReviewResponse;
+import com.projectforge.dto.ProjectReviewUpdateRequest;
 import com.projectforge.dto.RequirementsAnalysisResponse;
 import com.projectforge.entity.Project;
 import com.projectforge.entity.ProjectStatus;
 import com.projectforge.entity.User;
 import com.projectforge.exception.InvalidProjectStateException;
 import com.projectforge.exception.ProjectNotFoundException;
+import com.projectforge.exception.ProjectValidationException;
 import com.projectforge.repository.ProjectRepository;
 import com.projectforge.repository.UserRepository;
 import com.projectforge.testutil.TestSpecificationFactory;
@@ -230,6 +237,246 @@ class ProjectRequirementsServiceTest {
         Project saved = projectRepository.findById(testProject.getId()).orElseThrow();
         assertThat(saved.getStatus()).isEqualTo(ProjectStatus.UNDER_REVIEW);
         assertThat(saved.getProjectSpecification()).isEqualTo(originalSpec);
+    }
+
+    // ==========================================
+    // Phase 5: Review & Approval Unit Tests
+    // ==========================================
+
+    @Test
+    @DisplayName("GET review successfully returns specification, blocking questions, and approval state")
+    void getReviewSuccess() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJson());
+        testProject.setStatus(ProjectStatus.UNDER_REVIEW);
+        projectRepository.save(testProject);
+
+        ProjectReviewResponse response = service.getReview(testProject.getId(), testUser.getEmail());
+
+        assertThat(response.projectId()).isEqualTo(testProject.getId());
+        assertThat(response.status()).isEqualTo(ProjectStatus.UNDER_REVIEW);
+        assertThat(response.qualityScore()).isGreaterThanOrEqualTo(80);
+        assertThat(response.qualityDetails()).isNotNull();
+        assertThat(response.openQuestions()).hasSize(1);
+        assertThat(response.blockingQuestions()).hasSize(1);
+        assertThat(response.canApprove()).isFalse();
+        assertThat(response.approved()).isFalse();
+        assertThat(response.message()).contains("blocking clarification question");
+    }
+
+    @Test
+    @DisplayName("GET review without specification throws InvalidProjectStateException")
+    void getReviewWithoutSpecThrows() {
+        testProject.setProjectSpecification(null);
+        projectRepository.save(testProject);
+
+        assertThatThrownBy(() -> service.getReview(testProject.getId(), testUser.getEmail()))
+                .isInstanceOf(InvalidProjectStateException.class)
+                .hasMessageContaining("No requirements specification exists yet");
+    }
+
+    @Test
+    @DisplayName("GET review with foreign project throws ProjectNotFoundException (anti-IDOR)")
+    void getReviewAntiIdor() {
+        assertThatThrownBy(() -> service.getReview(999L, testUser.getEmail()))
+                .isInstanceOf(ProjectNotFoundException.class)
+                .hasMessageContaining("999");
+    }
+
+    @Test
+    @DisplayName("PUT review with valid spec without blocking questions updates specification and sets REQUIREMENTS_READY")
+    void updateReviewWithoutBlockingQuestionsSuccess() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJson());
+        testProject.setStatus(ProjectStatus.UNDER_REVIEW);
+        projectRepository.save(testProject);
+
+        ObjectNode specNode = (ObjectNode) TestSpecificationFactory.createValidSpecificationNode();
+        specNode.putArray("openQuestions"); // clear blocking questions
+
+        ProjectReviewUpdateRequest updateReq = new ProjectReviewUpdateRequest(specNode);
+        ProjectReviewResponse response = service.updateReview(testProject.getId(), updateReq, testUser.getEmail());
+
+        assertThat(response.status()).isEqualTo(ProjectStatus.REQUIREMENTS_READY);
+        assertThat(response.blockingQuestions()).isEmpty();
+        assertThat(response.canApprove()).isTrue();
+        assertThat(response.approved()).isFalse();
+
+        Project saved = projectRepository.findById(testProject.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(ProjectStatus.REQUIREMENTS_READY);
+    }
+
+    @Test
+    @DisplayName("PUT review with invalid structure throws ProjectValidationException")
+    void updateReviewInvalidStructureThrows() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJson());
+        testProject.setStatus(ProjectStatus.UNDER_REVIEW);
+        projectRepository.save(testProject);
+
+        ObjectNode specNode = (ObjectNode) TestSpecificationFactory.createValidSpecificationNode();
+        specNode.remove("features"); // missing required section
+
+        ProjectReviewUpdateRequest updateReq = new ProjectReviewUpdateRequest(specNode);
+        assertThatThrownBy(() -> service.updateReview(testProject.getId(), updateReq, testUser.getEmail()))
+                .isInstanceOf(ProjectValidationException.class)
+                .hasMessageContaining("features");
+    }
+
+    @Test
+    @DisplayName("PUT review on APPROVED project throws InvalidProjectStateException (post-approval protection)")
+    void updateReviewApprovedProjectThrows() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJson());
+        testProject.setStatus(ProjectStatus.APPROVED);
+        projectRepository.save(testProject);
+
+        ProjectReviewUpdateRequest updateReq = new ProjectReviewUpdateRequest(TestSpecificationFactory.createValidSpecificationNode());
+        assertThatThrownBy(() -> service.updateReview(testProject.getId(), updateReq, testUser.getEmail()))
+                .isInstanceOf(InvalidProjectStateException.class)
+                .hasMessageContaining("protected status APPROVED");
+    }
+
+    @Test
+    @DisplayName("POST analyze on APPROVED project throws InvalidProjectStateException (post-approval protection)")
+    void analyzeApprovedProjectThrows() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJson());
+        testProject.setStatus(ProjectStatus.APPROVED);
+        projectRepository.save(testProject);
+
+        assertThatThrownBy(() -> service.analyzeProject(testProject.getId(), testUser.getEmail()))
+                .isInstanceOf(InvalidProjectStateException.class)
+                .hasMessageContaining("APPROVED");
+    }
+
+    @Test
+    @DisplayName("POST clarifications on APPROVED project throws InvalidProjectStateException (post-approval protection)")
+    void submitClarificationsApprovedProjectThrows() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJson());
+        testProject.setStatus(ProjectStatus.APPROVED);
+        projectRepository.save(testProject);
+
+        ClarificationRequest request = new ClarificationRequest(List.of(new ClarificationAnswerDto("Q1", "Answer")));
+        assertThatThrownBy(() -> service.submitClarifications(testProject.getId(), request, testUser.getEmail()))
+                .isInstanceOf(InvalidProjectStateException.class)
+                .hasMessageContaining("APPROVED");
+    }
+
+    @Test
+    @DisplayName("POST approve successfully transitions REQUIREMENTS_READY project to APPROVED")
+    void approveProjectSuccess() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJsonWithoutQuestions());
+        testProject.setStatus(ProjectStatus.REQUIREMENTS_READY);
+        projectRepository.save(testProject);
+
+        ApprovalRequest request = new ApprovalRequest(true);
+        ApprovalResponse response = service.approveProject(testProject.getId(), request, testUser.getEmail());
+
+        assertThat(response.projectId()).isEqualTo(testProject.getId());
+        assertThat(response.status()).isEqualTo(ProjectStatus.APPROVED);
+        assertThat(response.approved()).isTrue();
+        assertThat(response.qualityScore()).isGreaterThanOrEqualTo(80);
+        assertThat(response.message()).contains("approved successfully");
+
+        Project saved = projectRepository.findById(testProject.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(ProjectStatus.APPROVED);
+    }
+
+    @Test
+    @DisplayName("POST approve is idempotent: repeated approval returns 200 OK without side effects")
+    void approveProjectIdempotent() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJsonWithoutQuestions());
+        testProject.setStatus(ProjectStatus.APPROVED);
+        projectRepository.save(testProject);
+
+        ApprovalRequest request = new ApprovalRequest(true);
+        ApprovalResponse response = service.approveProject(testProject.getId(), request, testUser.getEmail());
+
+        assertThat(response.status()).isEqualTo(ProjectStatus.APPROVED);
+        assertThat(response.approved()).isTrue();
+        assertThat(response.message()).contains("already approved");
+
+        Project saved = projectRepository.findById(testProject.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(ProjectStatus.APPROVED);
+    }
+
+    @Test
+    @DisplayName("POST approve rejects false or missing confirmation")
+    void approveProjectConfirmationValidationFailure() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJsonWithoutQuestions());
+        testProject.setStatus(ProjectStatus.REQUIREMENTS_READY);
+        projectRepository.save(testProject);
+
+        assertThatThrownBy(() -> service.approveProject(testProject.getId(), new ApprovalRequest(false), testUser.getEmail()))
+                .isInstanceOf(ProjectValidationException.class)
+                .hasMessageContaining("explicitly set to true");
+
+        assertThatThrownBy(() -> service.approveProject(testProject.getId(), new ApprovalRequest(null), testUser.getEmail()))
+                .isInstanceOf(ProjectValidationException.class);
+    }
+
+    @Test
+    @DisplayName("POST approve rejects project with unresolved HIGH/CRITICAL blocking questions")
+    void approveProjectWithBlockingQuestionsFails() {
+        // Spec contains Q1 with importance: HIGH
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJson());
+        testProject.setStatus(ProjectStatus.UNDER_REVIEW);
+        projectRepository.save(testProject);
+
+        ApprovalRequest request = new ApprovalRequest(true);
+        assertThatThrownBy(() -> service.approveProject(testProject.getId(), request, testUser.getEmail()))
+                .isInstanceOf(InvalidProjectStateException.class)
+                .hasMessageContaining("unresolved critical or high clarification questions remain");
+
+        Project saved = projectRepository.findById(testProject.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(ProjectStatus.UNDER_REVIEW);
+    }
+
+    @Test
+    @DisplayName("POST approve allows approval when only informational LOW questions remain")
+    void approveProjectWithLowQuestionsSucceeds() {
+        ObjectNode specNode = (ObjectNode) TestSpecificationFactory.createValidSpecificationNode();
+        ArrayNode questions = specNode.putArray("openQuestions");
+        ObjectNode q1 = questions.addObject();
+        q1.put("id", "Q1");
+        q1.put("question", "Preferred UI accent color?");
+        q1.put("importance", "LOW");
+        q1.put("reason", "Cosmetic only");
+
+        try {
+            testProject.setProjectSpecification(objectMapper.writeValueAsString(specNode));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        testProject.setStatus(ProjectStatus.REQUIREMENTS_READY);
+        projectRepository.save(testProject);
+
+        ApprovalRequest request = new ApprovalRequest(true);
+        ApprovalResponse response = service.approveProject(testProject.getId(), request, testUser.getEmail());
+
+        assertThat(response.status()).isEqualTo(ProjectStatus.APPROVED);
+        assertThat(response.approved()).isTrue();
+
+        Project saved = projectRepository.findById(testProject.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(ProjectStatus.APPROVED);
+    }
+
+    @Test
+    @DisplayName("POST approve rejects approval from illegal lifecycle state (DRAFT, ANALYZING)")
+    void approveProjectIllegalStateFails() {
+        testProject.setProjectSpecification(TestSpecificationFactory.createValidSpecificationJsonWithoutQuestions());
+        testProject.setStatus(ProjectStatus.DRAFT);
+        projectRepository.save(testProject);
+
+        ApprovalRequest request = new ApprovalRequest(true);
+        assertThatThrownBy(() -> service.approveProject(testProject.getId(), request, testUser.getEmail()))
+                .isInstanceOf(InvalidProjectStateException.class)
+                .hasMessageContaining("Cannot approve project from status: DRAFT");
+    }
+
+    @Test
+    @DisplayName("POST approve on foreign project throws ProjectNotFoundException (anti-IDOR)")
+    void approveProjectAntiIdor() {
+        ApprovalRequest request = new ApprovalRequest(true);
+        assertThatThrownBy(() -> service.approveProject(999L, request, testUser.getEmail()))
+                .isInstanceOf(ProjectNotFoundException.class)
+                .hasMessageContaining("999");
     }
 
     private static class InMemoryUserRepository implements UserRepository {

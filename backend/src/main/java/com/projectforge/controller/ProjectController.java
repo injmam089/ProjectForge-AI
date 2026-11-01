@@ -1,13 +1,22 @@
 package com.projectforge.controller;
 
+import com.projectforge.dto.ApprovalRequest;
+import com.projectforge.dto.ApprovalResponse;
 import com.projectforge.dto.ClarificationRequest;
+import com.projectforge.dto.DocumentGenerationResponse;
+import com.projectforge.dto.DocumentSummaryResponse;
 import com.projectforge.dto.ProjectCreateRequest;
 import com.projectforge.dto.ProjectResponse;
+import com.projectforge.dto.ProjectReviewResponse;
+import com.projectforge.dto.ProjectReviewUpdateRequest;
 import com.projectforge.dto.ProjectSpecificationResponse;
 import com.projectforge.dto.ProjectSpecificationUpdateRequest;
 import com.projectforge.dto.ProjectSummaryResponse;
 import com.projectforge.dto.ProjectUpdateRequest;
 import com.projectforge.dto.RequirementsAnalysisResponse;
+import com.projectforge.dto.WorkspaceResponse;
+import com.projectforge.service.DocumentGenerationService;
+import com.projectforge.service.DocumentWorkspaceService;
 import com.projectforge.service.ProjectRequirementsService;
 import com.projectforge.service.ProjectService;
 import jakarta.validation.Valid;
@@ -37,15 +46,36 @@ public class ProjectController {
 
     private final ProjectService projectService;
     private final ProjectRequirementsService projectRequirementsService;
+    private final DocumentGenerationService documentGenerationService;
+    private final DocumentWorkspaceService documentWorkspaceService;
 
     public ProjectController(ProjectService projectService) {
-        this(projectService, null);
+        this(projectService, null, null, null);
+    }
+
+    public ProjectController(ProjectService projectService, ProjectRequirementsService projectRequirementsService) {
+        this(projectService, projectRequirementsService, null, null);
+    }
+
+    public ProjectController(
+            ProjectService projectService,
+            ProjectRequirementsService projectRequirementsService,
+            DocumentGenerationService documentGenerationService
+    ) {
+        this(projectService, projectRequirementsService, documentGenerationService, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public ProjectController(ProjectService projectService, ProjectRequirementsService projectRequirementsService) {
+    public ProjectController(
+            ProjectService projectService,
+            ProjectRequirementsService projectRequirementsService,
+            DocumentGenerationService documentGenerationService,
+            DocumentWorkspaceService documentWorkspaceService
+    ) {
         this.projectService = projectService;
         this.projectRequirementsService = projectRequirementsService;
+        this.documentGenerationService = documentGenerationService;
+        this.documentWorkspaceService = documentWorkspaceService;
     }
 
     /**
@@ -179,6 +209,80 @@ public class ProjectController {
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         RequirementsAnalysisResponse response = projectRequirementsService.submitClarifications(id, request, userDetails.getUsername());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Retrieves the human-in-the-loop review summary for an owned project.
+     */
+    @GetMapping("/{id}/review")
+    public ResponseEntity<ProjectReviewResponse> getReview(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        ProjectReviewResponse response = projectRequirementsService.getReview(id, userDetails.getUsername());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Updates and validates the reviewed specification for an owned project during human review.
+     */
+    @PutMapping("/{id}/review")
+    public ResponseEntity<ProjectReviewResponse> updateReview(
+            @PathVariable Long id,
+            @Valid @RequestBody ProjectReviewUpdateRequest request,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        ProjectReviewResponse response = projectRequirementsService.updateReview(id, request, userDetails.getUsername());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Explicitly approves the structured project requirements as the single source of truth.
+     */
+    @PostMapping("/{id}/approve")
+    public ResponseEntity<ApprovalResponse> approveProject(
+            @PathVariable Long id,
+            @Valid @RequestBody ApprovalRequest request,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        ApprovalResponse response = projectRequirementsService.approveProject(id, request, userDetails.getUsername());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Generates consistent Markdown documentation package from the approved project specification.
+     */
+    @PostMapping("/{id}/generate")
+    public ResponseEntity<DocumentGenerationResponse> generateDocumentation(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        DocumentGenerationResponse response = documentGenerationService.generateDocumentation(id, userDetails.getUsername());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Retrieves all generated documentation files for an owned project.
+     */
+    @GetMapping("/{id}/documents")
+    public ResponseEntity<List<DocumentSummaryResponse>> getProjectDocuments(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        List<DocumentSummaryResponse> response = documentGenerationService.getProjectDocuments(id, userDetails.getUsername());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Retrieves workspace overview for an owned project.
+     */
+    @GetMapping("/{id}/workspace")
+    public ResponseEntity<WorkspaceResponse> getWorkspace(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        WorkspaceResponse response = documentWorkspaceService.getWorkspace(id, userDetails.getUsername());
         return ResponseEntity.ok(response);
     }
 }

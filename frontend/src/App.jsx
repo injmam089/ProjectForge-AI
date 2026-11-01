@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { MainLayout } from './layouts/MainLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { ProjectDetailsPage } from './pages/ProjectDetailsPage';
+import { MarkdownWorkspacePage } from './pages/MarkdownWorkspacePage';
 import { DocsPage } from './pages/DocsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
@@ -16,6 +17,7 @@ export function App() {
           <Route path="projects" element={<DashboardPage />} />
           <Route path="projects/new" element={<DashboardPage />} />
           <Route path="projects/:id" element={<ProjectDetailsPage />} />
+          <Route path="projects/:id/workspace" element={<MarkdownWorkspacePage />} />
           <Route path="projects/:id/edit" element={<ProjectDetailsPage initialEdit={true} />} />
           <Route path="docs" element={<DocsPage />} />
           <Route path="*" element={<NotFoundPage />} />

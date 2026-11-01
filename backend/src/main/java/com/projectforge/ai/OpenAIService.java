@@ -49,9 +49,18 @@ public class OpenAIService implements AIService {
             @Value("${app.ai.openai.timeout-seconds:60}") int timeoutSeconds,
             ObjectMapper objectMapper
     ) {
-        this(apiKey, model, baseUrl, timeoutSeconds, objectMapper, HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
-                .build());
+        this(apiKey, model, baseUrl, timeoutSeconds, objectMapper, createDefaultHttpClient());
+    }
+
+    private static HttpClient createDefaultHttpClient() {
+        try {
+            return HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(15))
+                    .build();
+        } catch (Throwable t) {
+            log.warn("Failed to create default HttpClient: {}", t.getMessage());
+            return null;
+        }
     }
 
     public OpenAIService(
@@ -75,15 +84,20 @@ public class OpenAIService implements AIService {
         if (apiKey.isBlank() || apiKey.equalsIgnoreCase("your_openai_api_key_placeholder")) {
             throw new AIServiceException("OpenAI API key is not configured. Please set the OPENAI_API_KEY environment variable or app.ai.openai.api-key configuration property.");
         }
+        if (this.httpClient == null) {
+            throw new AIServiceException("HTTP client is unavailable in current runtime environment");
+        }
 
         try {
             ObjectNode payload = objectMapper.createObjectNode();
             payload.put("model", model);
             payload.put("temperature", request.temperature());
 
-            // Enforce structured JSON object response format where supported
-            ObjectNode responseFormat = payload.putObject("response_format");
-            responseFormat.put("type", "json_object");
+            // Enforce structured JSON object response format where requested
+            if (request.jsonResponseFormat()) {
+                ObjectNode responseFormat = payload.putObject("response_format");
+                responseFormat.put("type", "json_object");
+            }
 
             ArrayNode messages = payload.putArray("messages");
 

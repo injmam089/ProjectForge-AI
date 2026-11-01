@@ -72,3 +72,50 @@ Return Project           Throw ResourceNotFoundException
 ```
 
 **Anti-Enumeration Rule**: Cross-user unauthorized access attempts return HTTP 404 (Not Found) rather than HTTP 403 (Forbidden) so attackers cannot enumerate foreign project IDs or verify resource existence.
+
+---
+
+## 5. Markdown Workspace & Document Versioning Architecture (Phase 7)
+
+### 5.1 Architecture Layers & Immutability Invariant
+
+ProjectForge AI strictly separates the approved specification layer from the document workspace:
+
+```text
+APPROVED PROJECT SPECIFICATION (Immutable JSON Source of Truth)
+                         ↓
+             Canonical Java Generators
+                         ↓
+                 Markdown Documents
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│                 MARKDOWN WORKSPACE                          │
+│                                                             │
+│  [Manual Editing]  [AI Actions]  [Regeneration]  [Restore]  │
+│        ↓                ↓              ↓             ↓      │
+│  MANUAL_EDIT        AI_EDIT        REGENERATE     RESTORE   │
+│        ↓                ↓              ↓             ↓      │
+│        └───────► DocumentVersion Snapshot ◄──────────┘      │
+│                  (Strictly Monotonic Increment)             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Crucial Invariant**:
+- Editing, AI-modifying, regenerating, or restoring a Markdown document **NEVER** alters or reverse-syncs to the approved `project_specification` JSON.
+- The approved project specification remains bit-for-bit immutable after user approval.
+
+### 5.2 Document Versioning Model
+
+- `Document` entity holds the active content and current version number.
+- `DocumentVersion` entity holds complete point-in-time snapshots of historical versions.
+- Every state mutation records a new snapshot with an explicit `DocumentChangeType` (`GENERATE`, `MANUAL_EDIT`, `AI_EDIT`, `REGENERATE`, `RESTORE`).
+- Concurrency protection: `findByIdWithLock(id)` uses database-level `PESSIMISTIC_WRITE` locking to guarantee strictly monotonic version progression without race conditions.
+- Version history is append-only: Restoring a historical version appends a new `RESTORE` version snapshot rather than resetting or deleting history.
+
+### 5.3 AI Document Editing Architecture
+
+- Read-Only Context: The approved specification is supplied to the AI prompt as contextual background.
+- Quarantine Fences: The current document content is wrapped in `<untrusted-document-content>` delimiters to eliminate prompt injection risks.
+- Action-Oriented Prompts: Supports `IMPROVE`, `EXPAND`, `SIMPLIFY`, and `CUSTOM` directives.
+- Validation Pipeline: Output is trimmed of superfluous wrapper fences and verified against length and safety rules before persistence.
+- Complete Auditability: AI edits record the applied action, user instruction, and timestamp in the version snapshot.

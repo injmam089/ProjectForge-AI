@@ -187,7 +187,272 @@ All project endpoints require `Authorization: Bearer <token>`.
 
 ---
 
-## 3. System & Health Endpoints
+## 3. Human-in-the-Loop Review & Approval Endpoints (Phase 5 Implemented)
+
+All review and approval endpoints require `Authorization: Bearer <token>`.
+**Strict Anti-IDOR Enforcement**: Cross-user review or approval attempts strictly return `404 Not Found` with zero metadata leakage.
+
+### Get Project Review
+- **Method**: `GET`
+- **Path**: `/api/projects/{id}/review`
+- **Description**: Returns review details including the structured specification, server-calculated quality score, detailed dimension breakdown, list of open clarification questions, blocking questions (CRITICAL or HIGH), and approval eligibility flags (`approved`, `canApprove`).
+- **Responses**:
+  - `200 OK`: `ProjectReviewResponse`
+  - `400 Bad Request`: No specification exists yet for this project.
+  - `404 Not Found`: Project does not exist OR belongs to another user (anti-IDOR).
+
+### Human-in-the-Loop Review Update
+- **Method**: `PUT`
+- **Path**: `/api/projects/{id}/review`
+- **Description**: Allows the project owner to edit the structured specification. The backend strictly validates the JSON schema against requirements, deterministically recalculates all 6 quality dimensions (25/15/15/15/15/15 = 100 max), evaluates remaining blocking questions, and updates the project status (`REQUIREMENTS_READY` if all critical/high questions resolved; `UNDER_REVIEW` if blocking questions remain).
+- **Post-Approval Protection**: Cannot be called on projects in `APPROVED` status; throws `400 Bad Request` (`InvalidProjectStateException`).
+- **Request Body**:
+  ```json
+  {
+    "specification": { ... }
+  }
+  ```
+- **Responses**:
+  - `200 OK`: Updated `ProjectReviewResponse` with re-evaluated quality score and status.
+  - `400 Bad Request`: Invalid JSON schema, missing mandatory sections, or project is in locked `APPROVED` state.
+  - `404 Not Found`: Project does not exist OR belongs to another user (anti-IDOR).
+
+### Explicit Project Approval
+- **Method**: `POST`
+- **Path**: `/api/projects/{id}/approve`
+- **Description**: Explicitly approves the project requirements specification and transitions status to `APPROVED`.
+- **Mandatory Approval Rules**:
+  - Approval is NEVER automatic; requires explicit confirmation (`"confirmation": true`).
+  - Cannot approve if unresolved `CRITICAL` or `HIGH` open questions exist.
+  - Quality score alone does NOT substitute for explicit approval.
+  - Idempotent: Calling approve on an already `APPROVED` project safely returns `200 OK` without side effects.
+- **Request Body**:
+  ```json
+  {
+    "confirmation": true
+  }
+  ```
+- **Responses**:
+  - `200 OK`: `ApprovalResponse` (`status: "APPROVED"`, `approved: true`).
+  - `400 Bad Request`: Missing/false confirmation, unresolved blocking questions, or project is in an ineligible state (e.g. `DRAFT`).
+  - `404 Not Found`: Project does not exist OR belongs to another user (anti-IDOR).
+
+---
+
+## 3.6 Markdown Documentation Generation (Phase 6)
+
+### Generate Project Documentation
+- **Method**: `POST`
+- **Path**: `/api/projects/{id}/generate`
+- **Description**: Triggers deterministic Markdown document generation strictly from the `APPROVED` Project Specification JSON (the single source of truth). Plans document set based on project type and specification, executes Java generators for all standard and specialized documents, runs cross-document consistency checks and Markdown validation, transactionally deletes old documents if re-generating, and persists documents with `version = 1`.
+- **Lifecycle Preconditions**: Project must be in `APPROVED` or `GENERATED` status. Any other status (`DRAFT`, `READY_FOR_ANALYSIS`, `ANALYZING`, `UNDER_REVIEW`, `REQUIREMENTS_READY`) returns `400 Bad Request` (`InvalidProjectStateException`).
+- **Post-Approval Protections**: Document generation never modifies the approved specification.
+- **Responses**:
+  - `200 OK`: `DocumentGenerationResponse`
+    ```json
+    {
+      "projectId": 1,
+      "status": "GENERATED",
+      "totalDocuments": 14,
+      "message": "Successfully generated 14 Markdown documents from approved specification.",
+      "documents": [
+        {
+          "id": 10,
+          "projectId": 1,
+          "filename": "README.md",
+          "type": "README",
+          "description": "Project overview, quick start, architecture summary, and key links",
+          "version": 1,
+          "characterCount": 3520,
+          "createdAt": "2026-11-01T20:00:00Z",
+          "updatedAt": "2026-11-01T20:00:00Z"
+        }
+      ]
+    }
+    ```
+  - `400 Bad Request`: Project is not in `APPROVED` or `GENERATED` state, or specification is missing/invalid.
+  - `404 Not Found`: Project does not exist OR belongs to another user (anti-IDOR).
+
+### List Project Documents
+- **Method**: `GET`
+- **Path**: `/api/projects/{id}/documents`
+- **Description**: Retrieves the summary list of all generated Markdown documents for the given project.
+- **Responses**:
+  - `200 OK`: Array of `DocumentSummaryResponse`
+  - `404 Not Found`: Project does not exist OR belongs to another user (anti-IDOR).
+
+### Get Single Document Content
+- **Method**: `GET`
+- **Path**: `/api/documents/{id}`
+- **Description**: Retrieves full document content including markdown body, character count, type, and version.
+- **Responses**:
+  - `200 OK`: `DocumentResponse`
+    ```json
+    {
+      "id": 10,
+      "projectId": 1,
+      "filename": "README.md",
+      "type": "README",
+      "content": "# Project Name\n\n...",
+      "version": 1,
+      "characterCount": 3520,
+      "createdAt": "2026-11-01T20:00:00Z",
+      "updatedAt": "2026-11-01T20:00:00Z"
+    }
+    ```
+  - `404 Not Found`: Document does not exist OR parent project belongs to another user (anti-IDOR).
+
+---
+
+## 3.7 Markdown Workspace & AI Document Editor (Phase 7)
+
+### Get Project Workspace
+- **Method**: `GET`
+- **Path**: `/api/projects/{id}/workspace`
+- **Description**: Retrieves full workspace overview for a project including project metadata, status, and all documents with current version and content.
+- **Responses**:
+  - `200 OK`: `WorkspaceResponse`
+    ```json
+    {
+      "projectId": 1,
+      "projectName": "CloudPulse Telemetry",
+      "status": "GENERATED",
+      "documents": [
+        {
+          "id": 10,
+          "filename": "README.md",
+          "type": "README",
+          "version": 2,
+          "characterCount": 4200,
+          "content": "# CloudPulse Telemetry\n\n..."
+        }
+      ]
+    }
+    ```
+  - `404 Not Found`: Project does not exist OR belongs to another user (anti-IDOR).
+
+### Save Document (Manual Edit)
+- **Method**: `PUT`
+- **Path**: `/api/documents/{id}`
+- **Description**: Updates document content with manual edits, increments version number monotonically, records a `MANUAL_EDIT` snapshot in `DocumentVersion`, and validates markdown safety.
+- **Request Body**:
+  ```json
+  {
+    "content": "# Updated Content\n\nNew markdown text..."
+  }
+  ```
+- **Responses**:
+  - `200 OK`: `DocumentSaveResponse`
+    ```json
+    {
+      "id": 10,
+      "filename": "README.md",
+      "version": 2,
+      "characterCount": 3850,
+      "message": "Document saved successfully as version 2"
+    }
+    ```
+  - `400 Bad Request`: Validation failure (empty content, length < 20 or > 500,000, dangerous HTML scripts, missing Markdown heading).
+  - `404 Not Found`: Document does not exist OR parent project belongs to another user (anti-IDOR).
+
+### List Document Version History
+- **Method**: `GET`
+- **Path**: `/api/documents/{id}/versions`
+- **Description**: Returns all historical versions of a document ordered descending by version number (metadata only, excluding full body text).
+- **Responses**:
+  - `200 OK`: Array of `DocumentVersionSummaryResponse`
+    ```json
+    [
+      {
+        "id": 25,
+        "version": 2,
+        "changeType": "MANUAL_EDIT",
+        "instruction": null,
+        "characterCount": 3850,
+        "createdBy": "user@example.com",
+        "createdAt": "2026-11-02T10:15:00Z"
+      },
+      {
+        "id": 12,
+        "version": 1,
+        "changeType": "GENERATE",
+        "instruction": null,
+        "characterCount": 3520,
+        "createdBy": "system",
+        "createdAt": "2026-11-01T20:00:00Z"
+      }
+    ]
+    ```
+  - `404 Not Found`: Document does not exist OR belongs to another user (anti-IDOR).
+
+### Get Historical Version Snapshot
+- **Method**: `GET`
+- **Path**: `/api/documents/{id}/versions/{version}`
+- **Description**: Retrieves full content and metadata for a specific historical version snapshot.
+- **Responses**:
+  - `200 OK`: `DocumentVersionResponse`
+    ```json
+    {
+      "id": 12,
+      "documentId": 10,
+      "version": 1,
+      "content": "# CloudPulse Telemetry\n\nOriginal v1 text...",
+      "changeType": "GENERATE",
+      "instruction": null,
+      "characterCount": 3520,
+      "createdBy": "system",
+      "createdAt": "2026-11-01T20:00:00Z"
+    }
+    ```
+  - `404 Not Found`: Document or specific version does not exist, or belongs to another user (anti-IDOR).
+
+### Restore Historical Version
+- **Method**: `POST`
+- **Path**: `/api/documents/{id}/restore/{version}`
+- **Description**: Restores document content to match a historical version. Appends a brand-new `RESTORE` version snapshot to preserve complete audit history without rewriting past versions.
+- **Responses**:
+  - `200 OK`: `DocumentResponse` with updated version (e.g. `version: 4`).
+  - `404 Not Found`: Document or version does not exist, or belongs to another user (anti-IDOR).
+
+### Regenerate Document from Specification
+- **Method**: `POST`
+- **Path**: `/api/documents/{id}/regenerate`
+- **Description**: Deterministically regenerates a single document strictly from the approved project specification JSON using the canonical generator. Increments version monotonically and records `REGENERATE` snapshot.
+- **Responses**:
+  - `200 OK`: `DocumentResponse`
+  - `400 Bad Request`: Project is not in `APPROVED` or `GENERATED` status.
+  - `404 Not Found`: Document does not exist OR parent project belongs to another user (anti-IDOR).
+
+### AI Document Edit
+- **Method**: `POST`
+- **Path**: `/api/documents/{id}/ai-edit`
+- **Description**: Applies an AI editing action (`IMPROVE`, `EXPAND`, `SIMPLIFY`, `CUSTOM`) to the document. The approved project specification is provided as read-only context. Strict prompt injection isolation fences protect the LLM. The approved specification is verified 100% untouched.
+- **Request Body**:
+  ```json
+  {
+    "action": "IMPROVE",
+    "instruction": "Optional specific focus note..."
+  }
+  ```
+- **Responses**:
+  - `200 OK`: `DocumentAiEditResponse`
+    ```json
+    {
+      "id": 10,
+      "filename": "README.md",
+      "version": 3,
+      "content": "# Improved README\n\n...",
+      "action": "IMPROVE",
+      "message": "AI edit applied successfully as version 3"
+    }
+    ```
+  - `400 Bad Request`: Missing action or validation failure.
+  - `404 Not Found`: Document does not exist OR parent project belongs to another user (anti-IDOR).
+  - `503 Service Unavailable`: External AI service failure or timeout.
+
+---
+
+## 4. System & Health Endpoints
 
 ### System Health
 - **Method**: `GET`
@@ -208,21 +473,8 @@ All project endpoints require `Authorization: Bearer <token>`.
 
 ---
 
-## 4. Planned Future Endpoints (Phase 4+)
+## 5. Planned Future Endpoints (Phase 8+)
 
-### Requirements Engine (Phase 4)
-- `POST /api/projects/{id}/analyze`
-- `GET /api/projects/{id}/requirements`
-- `PUT /api/projects/{id}/requirements`
-- `POST /api/projects/{id}/requirements/validate`
-- `POST /api/projects/{id}/approve`
-
-### Documents Engine (Phase 5)
-- `POST /api/projects/{id}/generate`
-- `GET /api/projects/{id}/documents`
-- `GET /api/documents/{id}`
-- `PUT /api/documents/{id}`
-- `POST /api/documents/{id}/ai-edit`
-
-### Export Engine (Phase 6)
+### Export Engine (Phase 8)
 - `POST /api/projects/{id}/export`
+- `GET /api/projects/{id}/export/download`

@@ -62,4 +62,36 @@ export const projectService = {
       body: JSON.stringify({ answers }),
     });
   },
+
+  async getReview(id) {
+    return apiClient(`/projects/${id}/review`);
+  },
+
+  async updateReview(id, specification) {
+    return apiClient(`/projects/${id}/review`, {
+      method: 'PUT',
+      body: JSON.stringify({ specification }),
+    });
+  },
+
+  async approveProject(id, confirmation = true) {
+    return apiClient(`/projects/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ confirmation }),
+    });
+  },
+
+  async generateDocuments(id) {
+    return apiClient(`/projects/${id}/generate`, {
+      method: 'POST',
+    });
+  },
+
+  async getDocuments(id) {
+    return apiClient(`/projects/${id}/documents`);
+  },
+
+  async getDocument(id) {
+    return apiClient(`/documents/${id}`);
+  },
 };

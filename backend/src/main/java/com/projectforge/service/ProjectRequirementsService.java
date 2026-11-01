@@ -4,9 +4,16 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.projectforge.ai.ClarificationEngine;
+import com.projectforge.ai.QualityEvaluator;
 import com.projectforge.ai.RequirementAnalyzer;
+import com.projectforge.ai.RequirementValidator;
+import com.projectforge.dto.ApprovalRequest;
+import com.projectforge.dto.ApprovalResponse;
 import com.projectforge.dto.ClarificationRequest;
 import com.projectforge.dto.OpenQuestionDto;
+import com.projectforge.dto.ProjectReviewResponse;
+import com.projectforge.dto.ProjectReviewUpdateRequest;
+import com.projectforge.dto.QualityScoreDto;
 import com.projectforge.dto.RequirementsAnalysisResponse;
 import com.projectforge.entity.Project;
 import com.projectforge.entity.ProjectStatus;
@@ -14,10 +21,12 @@ import com.projectforge.entity.User;
 import com.projectforge.exception.AIServiceException;
 import com.projectforge.exception.InvalidProjectStateException;
 import com.projectforge.exception.ProjectNotFoundException;
+import com.projectforge.exception.ProjectValidationException;
 import com.projectforge.repository.ProjectRepository;
 import com.projectforge.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,7 +47,28 @@ public class ProjectRequirementsService {
     private final UserRepository userRepository;
     private final RequirementAnalyzer requirementAnalyzer;
     private final ClarificationEngine clarificationEngine;
+    private final RequirementValidator requirementValidator;
+    private final QualityEvaluator qualityEvaluator;
     private final ObjectMapper objectMapper;
+
+    @Autowired
+    public ProjectRequirementsService(
+            ProjectRepository projectRepository,
+            UserRepository userRepository,
+            RequirementAnalyzer requirementAnalyzer,
+            ClarificationEngine clarificationEngine,
+            RequirementValidator requirementValidator,
+            QualityEvaluator qualityEvaluator,
+            ObjectMapper objectMapper
+    ) {
+        this.projectRepository = projectRepository;
+        this.userRepository = userRepository;
+        this.requirementAnalyzer = requirementAnalyzer;
+        this.clarificationEngine = clarificationEngine;
+        this.requirementValidator = requirementValidator;
+        this.qualityEvaluator = qualityEvaluator;
+        this.objectMapper = objectMapper;
+    }
 
     public ProjectRequirementsService(
             ProjectRepository projectRepository,
@@ -47,11 +77,8 @@ public class ProjectRequirementsService {
             ClarificationEngine clarificationEngine,
             ObjectMapper objectMapper
     ) {
-        this.projectRepository = projectRepository;
-        this.userRepository = userRepository;
-        this.requirementAnalyzer = requirementAnalyzer;
-        this.clarificationEngine = clarificationEngine;
-        this.objectMapper = objectMapper;
+        this(projectRepository, userRepository, requirementAnalyzer, clarificationEngine,
+                new RequirementValidator(), new QualityEvaluator(), objectMapper);
     }
 
     /**
@@ -71,7 +98,8 @@ public class ProjectRequirementsService {
         if (project.getStatus() == ProjectStatus.ANALYZING) {
             throw new InvalidProjectStateException("Analysis is already currently executing for project id: " + projectId);
         }
-        if (project.getStatus() == ProjectStatus.GENERATING ||
+        if (project.getStatus() == ProjectStatus.APPROVED ||
+                project.getStatus() == ProjectStatus.GENERATING ||
                 project.getStatus() == ProjectStatus.GENERATED ||
                 project.getStatus() == ProjectStatus.EXPORTED) {
             throw new InvalidProjectStateException("Cannot re-analyze project in status: " + project.getStatus());
@@ -177,7 +205,8 @@ public class ProjectRequirementsService {
         if (project.getStatus() == ProjectStatus.ANALYZING) {
             throw new InvalidProjectStateException("Analysis is currently in progress for project id: " + projectId);
         }
-        if (project.getStatus() == ProjectStatus.GENERATING ||
+        if (project.getStatus() == ProjectStatus.APPROVED ||
+                project.getStatus() == ProjectStatus.GENERATING ||
                 project.getStatus() == ProjectStatus.GENERATED ||
                 project.getStatus() == ProjectStatus.EXPORTED) {
             throw new InvalidProjectStateException("Cannot submit clarifications for project in status: " + project.getStatus());
@@ -214,6 +243,240 @@ public class ProjectRequirementsService {
             log.error("Clarification failed for project id: {}. Stored specification preserved.", projectId, e);
             throw e;
         }
+    }
+
+    /**
+     * Retrieves the human-in-the-loop review summary for an owned project.
+     * Enforces ownership, anti-IDOR, and computes blocking questions and approval eligibility.
+     *
+     * @param projectId the project ID
+     * @param userEmail the authenticated user's email
+     * @return the structured ProjectReviewResponse
+     */
+    @Transactional(readOnly = true)
+    public ProjectReviewResponse getReview(Long projectId, String userEmail) {
+        User user = resolveUser(userEmail);
+        Project project = findOwnedProject(projectId, user);
+
+        if (project.getProjectSpecification() == null || project.getProjectSpecification().isBlank()) {
+            throw new InvalidProjectStateException("No requirements specification exists yet for project id: " + projectId);
+        }
+
+        try {
+            JsonNode specNode = objectMapper.readTree(project.getProjectSpecification());
+            QualityScoreDto qualityDto = qualityEvaluator.evaluate(specNode);
+            List<OpenQuestionDto> openQuestions = requirementAnalyzer.extractOpenQuestions(specNode);
+            List<OpenQuestionDto> blockingQuestions = openQuestions.stream()
+                    .filter(q -> q.importance() != null &&
+                            ("CRITICAL".equalsIgnoreCase(q.importance().trim()) || "HIGH".equalsIgnoreCase(q.importance().trim())))
+                    .toList();
+
+            boolean approved = (project.getStatus() == ProjectStatus.APPROVED);
+            boolean canApprove = !approved && project.getStatus().canBeApproved() && blockingQuestions.isEmpty();
+
+            String message;
+            if (approved) {
+                message = "Project requirements are approved and locked as the single source of truth.";
+            } else if (blockingQuestions.isEmpty()) {
+                message = "Specification is ready for human review and explicit approval.";
+            } else {
+                message = "Specification is under review. " + blockingQuestions.size()
+                        + " blocking clarification question(s) must be resolved prior to approval.";
+            }
+
+            return new ProjectReviewResponse(
+                    project.getId(),
+                    project.getStatus(),
+                    qualityDto.overallScore(),
+                    qualityDto,
+                    specNode,
+                    openQuestions,
+                    blockingQuestions,
+                    approved,
+                    canApprove,
+                    message
+            );
+        } catch (JsonProcessingException e) {
+            throw new AIServiceException("Corrupted specification in database for project id: " + projectId, e);
+        }
+    }
+
+    /**
+     * Updates and validates the specification during human review.
+     * Recalculates quality score server-side, validates schema, evaluates blocking questions,
+     * updates lifecycle status, and prevents modification of approved specifications.
+     *
+     * @param projectId the project ID
+     * @param request the specification update request
+     * @param userEmail the authenticated user's email
+     * @return the updated ProjectReviewResponse
+     */
+    @Transactional
+    public ProjectReviewResponse updateReview(Long projectId, ProjectReviewUpdateRequest request, String userEmail) {
+        User user = resolveUser(userEmail);
+        Project project = findOwnedProject(projectId, user);
+
+        if (project.getStatus() == ProjectStatus.APPROVED ||
+                project.getStatus() == ProjectStatus.GENERATING ||
+                project.getStatus() == ProjectStatus.GENERATED ||
+                project.getStatus() == ProjectStatus.EXPORTED) {
+            throw new InvalidProjectStateException("Cannot modify specification: Project is in protected status "
+                    + project.getStatus() + ". Approved requirements are locked.");
+        }
+
+        if (project.getStatus() == ProjectStatus.ANALYZING) {
+            throw new InvalidProjectStateException("Analysis is currently executing for project id: " + projectId);
+        }
+
+        if (request == null || request.specification() == null || !request.specification().isObject()) {
+            throw new ProjectValidationException("Specification payload must be a non-empty JSON object.");
+        }
+
+        JsonNode specNode = request.specification().deepCopy();
+
+        // Validate structure and required sections
+        try {
+            requirementValidator.validate(specNode);
+        } catch (RuntimeException e) {
+            log.warn("Specification validation failed during review update for project id {}: {}", projectId, e.getMessage());
+            throw new ProjectValidationException("Invalid specification structure: " + e.getMessage());
+        }
+
+        // Server-side deterministic quality evaluation (replaces/stamps qualityScore & qualityBreakdown)
+        QualityScoreDto qualityDto = qualityEvaluator.evaluate(specNode);
+
+        // Extract open questions
+        List<OpenQuestionDto> openQuestions = requirementAnalyzer.extractOpenQuestions(specNode);
+        List<OpenQuestionDto> blockingQuestions = openQuestions.stream()
+                .filter(q -> q.importance() != null &&
+                        ("CRITICAL".equalsIgnoreCase(q.importance().trim()) || "HIGH".equalsIgnoreCase(q.importance().trim())))
+                .toList();
+
+        // Determine next lifecycle state based on blocking questions
+        ProjectStatus nextStatus = determineRequirementsStatus(openQuestions);
+        project.setStatus(nextStatus);
+
+        try {
+            project.setProjectSpecification(objectMapper.writeValueAsString(specNode));
+        } catch (JsonProcessingException e) {
+            throw new ProjectValidationException("Failed to serialize updated specification JSON: " + e.getMessage());
+        }
+
+        Project savedProject = projectRepository.save(project);
+        log.info("Project id: {} updated via review in status: {} with quality score: {}",
+                savedProject.getId(), nextStatus, qualityDto.overallScore());
+
+        boolean approved = false;
+        boolean canApprove = blockingQuestions.isEmpty();
+        String message = blockingQuestions.isEmpty()
+                ? "Specification updated and validated successfully. Requirements are ready for approval."
+                : "Specification updated. " + blockingQuestions.size() + " blocking clarification question(s) remain under review.";
+
+        return new ProjectReviewResponse(
+                savedProject.getId(),
+                savedProject.getStatus(),
+                qualityDto.overallScore(),
+                qualityDto,
+                specNode,
+                openQuestions,
+                blockingQuestions,
+                approved,
+                canApprove,
+                message
+        );
+    }
+
+    /**
+     * Explicitly approves the structured project requirements as the single source of truth.
+     * Enforces explicit user confirmation, ownership, valid state, validation pass,
+     * zero blocking questions, and idempotent re-approvals.
+     *
+     * @param projectId the project ID
+     * @param request the approval confirmation request
+     * @param userEmail the authenticated user's email
+     * @return the ApprovalResponse
+     */
+    @Transactional
+    public ApprovalResponse approveProject(Long projectId, ApprovalRequest request, String userEmail) {
+        if (request == null || request.confirmation() == null || !request.confirmation()) {
+            throw new ProjectValidationException("Approval confirmation must be explicitly set to true");
+        }
+
+        User user = resolveUser(userEmail);
+        Project project = findOwnedProject(projectId, user);
+
+        // Idempotency: if already approved, safely return existing approval response
+        if (project.getStatus() == ProjectStatus.APPROVED) {
+            log.info("Project id: {} is already approved. Returning idempotent response.", projectId);
+            JsonNode existingSpec;
+            int existingScore = 80;
+            try {
+                existingSpec = objectMapper.readTree(project.getProjectSpecification());
+                existingScore = existingSpec.path("qualityScore").asInt(80);
+            } catch (Exception e) {
+                existingSpec = objectMapper.createObjectNode();
+            }
+            return new ApprovalResponse(
+                    project.getId(),
+                    ProjectStatus.APPROVED,
+                    true,
+                    existingScore,
+                    "Project requirements are already approved.",
+                    existingSpec
+            );
+        }
+
+        // Lifecycle state eligibility check
+        if (!project.getStatus().canBeApproved()) {
+            throw new InvalidProjectStateException("Cannot approve project from status: " + project.getStatus()
+                    + ". Project must be in REQUIREMENTS_READY or UNDER_REVIEW state.");
+        }
+
+        // Specification presence check
+        if (project.getProjectSpecification() == null || project.getProjectSpecification().isBlank()) {
+            throw new InvalidProjectStateException("Cannot approve project: No requirements specification exists.");
+        }
+
+        JsonNode specNode;
+        try {
+            specNode = objectMapper.readTree(project.getProjectSpecification());
+        } catch (JsonProcessingException e) {
+            throw new AIServiceException("Corrupted specification in database for project id: " + projectId, e);
+        }
+
+        // Validate specification schema
+        try {
+            requirementValidator.validate(specNode);
+        } catch (RuntimeException e) {
+            throw new InvalidProjectStateException("Cannot approve project: Specification fails validation checks: " + e.getMessage());
+        }
+
+        // Blocking questions check: must have NO unresolved CRITICAL or HIGH questions
+        List<OpenQuestionDto> openQuestions = requirementAnalyzer.extractOpenQuestions(specNode);
+        if (hasBlockingQuestions(openQuestions)) {
+            List<OpenQuestionDto> blocking = openQuestions.stream()
+                    .filter(q -> q.importance() != null &&
+                            ("CRITICAL".equalsIgnoreCase(q.importance().trim()) || "HIGH".equalsIgnoreCase(q.importance().trim())))
+                    .toList();
+            throw new InvalidProjectStateException("Cannot approve project: " + blocking.size()
+                    + " unresolved critical or high clarification questions remain. All blocking questions must be resolved prior to approval.");
+        }
+
+        // Transition to APPROVED
+        project.setStatus(ProjectStatus.APPROVED);
+        Project savedProject = projectRepository.save(project);
+        int qualityScore = specNode.path("qualityScore").asInt(80);
+
+        log.info("Project id: {} explicitly approved by user: {}", savedProject.getId(), user.getId());
+
+        return new ApprovalResponse(
+                savedProject.getId(),
+                savedProject.getStatus(),
+                true,
+                qualityScore,
+                "Project requirements approved successfully. The specification is locked as the single source of truth.",
+                specNode
+        );
     }
 
     /**

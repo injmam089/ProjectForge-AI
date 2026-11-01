@@ -55,6 +55,28 @@ Stores user projects and core specification intake data.
 
 ---
 
+## 2.3 `documents` Table (Implemented in Phase 6)
+
+The `documents` table stores all generated Markdown documentation associated with an approved project specification.
+
+| Column | Data Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | BIGSERIAL | PRIMARY KEY | Unique surrogate identifier |
+| `project_id` | BIGINT | NOT NULL, REFERENCES `projects(id)` ON DELETE CASCADE | Associated project identifier |
+| `document_type` | VARCHAR(50) | NOT NULL | Type identifier matching `DocumentType` enum |
+| `filename` | VARCHAR(255) | NOT NULL | Target Markdown filename (e.g. `README.md`) |
+| `content` | TEXT | NOT NULL | Complete generated Markdown content |
+| `version` | INT | NOT NULL DEFAULT 1 | Document revision counter |
+| `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | Record creation timestamp |
+| `updated_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | Record update timestamp |
+
+**Indexes & Constraints**:
+- `documents_pkey`: Primary key on `id`
+- `uk_documents_project_filename`: Unique composite constraint on `(project_id, filename)` ensuring no duplicate filenames per project
+- `fk_documents_project`: Foreign key constraint to `projects(id)` with `ON DELETE CASCADE`
+
+---
+
 ## 3. Enumerations
 
 ### 3.1 `ProjectStatus`
@@ -86,16 +108,17 @@ Stores user projects and core specification intake data.
 - `ADVANCED`
 - `EXPERT`
 
+### 3.4 `DocumentType` (Phase 6)
+- Standard: `README`, `PROJECT_REQUIREMENTS`, `PROJECT_GOALS`, `FEATURES`, `TECH_STACK`, `ARCHITECTURE`, `DATABASE`, `API_SPECIFICATION`, `SECURITY`, `UI_UX_REQUIREMENTS`, `DEVELOPMENT_PLAN`, `TESTING`, `DEPLOYMENT`, `AI_BUILD_INSTRUCTIONS`
+- Specialized: `MODEL_REQUIREMENTS`, `DATASET`, `ML_PIPELINE`, `HARDWARE_REQUIREMENTS`, `SENSOR_SPECIFICATION`, `IOT_PROTOCOLS`, `THREAT_MODEL`, `SECURITY_TESTING`, `MOBILE_REQUIREMENTS`
+
 ---
 
-## 4. Planned Future Tables (Phase 5+)
+## 4. Planned Future Tables (Phase 7+)
 
-### `documents` Table
+### `document_edits` Table (Phase 7)
 - `id`: BIGSERIAL PRIMARY KEY
-- `project_id`: BIGINT NOT NULL FK(`projects.id`)
-- `document_type`: VARCHAR(50) NOT NULL
-- `filename`: VARCHAR(255) NOT NULL
-- `content`: TEXT NOT NULL
-- `version`: INT NOT NULL DEFAULT 1
-- `created_at`: TIMESTAMP WITH TIME ZONE
-- `updated_at`: TIMESTAMP WITH TIME ZONE
+- `document_id`: BIGINT NOT NULL FK(`documents.id`)
+- `prompt`: TEXT NOT NULL
+- `diff`: TEXT NOT NULL
+- `applied_at`: TIMESTAMP WITH TIME ZONE

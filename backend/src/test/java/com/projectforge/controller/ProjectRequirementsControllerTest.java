@@ -1,9 +1,14 @@
 package com.projectforge.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.projectforge.dto.ApprovalRequest;
+import com.projectforge.dto.ApprovalResponse;
 import com.projectforge.dto.ClarificationAnswerDto;
 import com.projectforge.dto.ClarificationRequest;
 import com.projectforge.dto.OpenQuestionDto;
+import com.projectforge.dto.ProjectReviewResponse;
+import com.projectforge.dto.ProjectReviewUpdateRequest;
+import com.projectforge.dto.QualityScoreDto;
 import com.projectforge.dto.RequirementsAnalysisResponse;
 import com.projectforge.entity.ProjectStatus;
 import com.projectforge.entity.Role;
@@ -30,6 +35,7 @@ import java.util.List;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -126,6 +132,82 @@ class ProjectRequirementsControllerTest {
                 .andExpect(jsonPath("$.error").value("Bad Request"));
     }
 
+    // ==========================================
+    // Phase 5: Review & Approval Controller Tests
+    // ==========================================
+
+    @Test
+    @DisplayName("GET /api/projects/{id}/review returns 200 OK with ProjectReviewResponse")
+    void getReviewEndpointSuccess() throws Exception {
+        mockMvc.perform(get("/api/projects/1/review"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.projectId").value(1))
+                .andExpect(jsonPath("$.status").value("UNDER_REVIEW"))
+                .andExpect(jsonPath("$.qualityScore").value(88))
+                .andExpect(jsonPath("$.canApprove").value(false))
+                .andExpect(jsonPath("$.approved").value(false));
+    }
+
+    @Test
+    @DisplayName("GET /api/projects/{id}/review on foreign project returns 404 Not Found (anti-IDOR)")
+    void getReviewAntiIdor() throws Exception {
+        mockMvc.perform(get("/api/projects/999/review"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("Not Found"));
+    }
+
+    @Test
+    @DisplayName("PUT /api/projects/{id}/review updates specification and returns 200 OK")
+    void updateReviewEndpointSuccess() throws Exception {
+        ProjectReviewUpdateRequest request = new ProjectReviewUpdateRequest(TestSpecificationFactory.createValidSpecificationNode());
+
+        mockMvc.perform(put("/api/projects/1/review")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.projectId").value(1))
+                .andExpect(jsonPath("$.status").value("REQUIREMENTS_READY"))
+                .andExpect(jsonPath("$.canApprove").value(true));
+    }
+
+    @Test
+    @DisplayName("POST /api/projects/{id}/approve with confirmation true returns 200 OK")
+    void approveProjectEndpointSuccess() throws Exception {
+        ApprovalRequest request = new ApprovalRequest(true);
+
+        mockMvc.perform(post("/api/projects/1/approve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.projectId").value(1))
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.approved").value(true));
+    }
+
+    @Test
+    @DisplayName("POST /api/projects/{id}/approve with confirmation false returns 400 Bad Request")
+    void approveProjectEndpointValidationFailure() throws Exception {
+        ApprovalRequest request = new ApprovalRequest(false);
+
+        mockMvc.perform(post("/api/projects/1/approve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Bad Request"));
+    }
+
+    @Test
+    @DisplayName("POST /api/projects/{id}/approve on foreign project returns 404 Not Found (anti-IDOR)")
+    void approveProjectAntiIdor() throws Exception {
+        ApprovalRequest request = new ApprovalRequest(true);
+
+        mockMvc.perform(post("/api/projects/999/approve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("Not Found"));
+    }
+
     private static class StubProjectRequirementsService extends ProjectRequirementsService {
 
         public StubProjectRequirementsService() {
@@ -174,6 +256,59 @@ class ProjectRequirementsControllerTest {
                     TestSpecificationFactory.createValidSpecificationNode(),
                     List.of(),
                     "Clarified"
+            );
+        }
+
+        @Override
+        public ProjectReviewResponse getReview(Long projectId, String userEmail) {
+            if (projectId.equals(999L)) {
+                throw new ProjectNotFoundException(999L);
+            }
+            return new ProjectReviewResponse(
+                    projectId,
+                    ProjectStatus.UNDER_REVIEW,
+                    88,
+                    new QualityScoreDto(88, 25, 12, 13, 13, 12, 13, "Summary", List.of(), List.of()),
+                    TestSpecificationFactory.createValidSpecificationNode(),
+                    List.of(new OpenQuestionDto("Q1", "Compression?", "HIGH", "Reason")),
+                    List.of(new OpenQuestionDto("Q1", "Compression?", "HIGH", "Reason")),
+                    false,
+                    false,
+                    "Specification is under review."
+            );
+        }
+
+        @Override
+        public ProjectReviewResponse updateReview(Long projectId, ProjectReviewUpdateRequest request, String userEmail) {
+            if (projectId.equals(999L)) {
+                throw new ProjectNotFoundException(999L);
+            }
+            return new ProjectReviewResponse(
+                    projectId,
+                    ProjectStatus.REQUIREMENTS_READY,
+                    90,
+                    new QualityScoreDto(90, 25, 13, 13, 13, 13, 13, "Summary", List.of(), List.of()),
+                    request.specification(),
+                    List.of(),
+                    List.of(),
+                    false,
+                    true,
+                    "Specification updated."
+            );
+        }
+
+        @Override
+        public ApprovalResponse approveProject(Long projectId, ApprovalRequest request, String userEmail) {
+            if (projectId.equals(999L)) {
+                throw new ProjectNotFoundException(999L);
+            }
+            return new ApprovalResponse(
+                    projectId,
+                    ProjectStatus.APPROVED,
+                    true,
+                    90,
+                    "Project requirements approved successfully.",
+                    TestSpecificationFactory.createValidSpecificationNode()
             );
         }
     }

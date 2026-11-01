@@ -4,10 +4,13 @@ import {
   ArrowLeft, Edit3, Trash2, Sparkles, Shield, AlertCircle, 
   CheckCircle2, Clock, Calendar, Tag, Layers, Server, 
   HelpCircle, Send, Database, Code, Activity, RefreshCw,
-  Check, Lock, ChevronRight
+  Check, Lock, ChevronRight, ShieldCheck, AlertTriangle, Plus,
+  FileText, Eye, BookOpen
 } from 'lucide-react';
 import { projectService } from '../services/projectService';
 import { authService } from '../services/authService';
+import { ApprovalModal } from '../components/ApprovalModal';
+import { DocumentViewerModal } from '../components/DocumentViewerModal';
 import { PROJECT_TYPES, DIFFICULTY_LEVELS } from '../utils/constants';
 
 export function ProjectDetailsPage({ initialEdit = false }) {
@@ -31,6 +34,23 @@ export function ProjectDetailsPage({ initialEdit = false }) {
   const [isSubmittingClarifications, setIsSubmittingClarifications] = useState(false);
   const [aiError, setAiError] = useState('');
   const [activeSpecTab, setActiveSpecTab] = useState('features');
+
+  // Phase 5 Human-in-the-Loop Review & Approval State
+  const [isEditingSpec, setIsEditingSpec] = useState(false);
+  const [editedSpec, setEditedSpec] = useState(null);
+  const [isSavingSpec, setIsSavingSpec] = useState(false);
+  const [rawJsonMode, setRawJsonMode] = useState(false);
+  const [rawJsonText, setRawJsonText] = useState('');
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState('');
+
+  // Phase 6 Markdown Documentation Generation State
+  const [documents, setDocuments] = useState([]);
+  const [isGeneratingDocs, setIsGeneratingDocs] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [docLoading, setDocLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -71,22 +91,178 @@ export function ProjectDetailsPage({ initialEdit = false }) {
       // Parse existing specification if present
       if (data.projectSpecification) {
         try {
-          const parsed = typeof data.projectSpecification === 'string'
-            ? JSON.parse(data.projectSpecification)
-            : data.projectSpecification;
-          setSpecification(parsed);
-          setQualityScore(parsed.qualityScore || 80);
-          if (parsed.openQuestions && Array.isArray(parsed.openQuestions)) {
-            setOpenQuestions(parsed.openQuestions);
+          const review = await projectService.getReview(id);
+          setSpecification(review.specification);
+          setQualityScore(review.qualityScore);
+          setOpenQuestions(review.openQuestions || []);
+        } catch (revErr) {
+          try {
+            const parsed = typeof data.projectSpecification === 'string'
+              ? JSON.parse(data.projectSpecification)
+              : data.projectSpecification;
+            setSpecification(parsed);
+            setQualityScore(parsed.qualityScore || 80);
+            if (parsed.openQuestions && Array.isArray(parsed.openQuestions)) {
+              setOpenQuestions(parsed.openQuestions);
+            }
+          } catch (e) {
+            console.error("Failed to parse stored specification", e);
           }
-        } catch (e) {
-          console.error("Failed to parse stored specification", e);
+        }
+      }
+      // Load documents if already generated (Phase 6)
+      if (data.status === 'GENERATED') {
+        try {
+          const docs = await projectService.getDocuments(id);
+          setDocuments(docs || []);
+        } catch (docErr) {
+          console.error("Failed to load documents", docErr);
         }
       }
     } catch (err) {
       setError(err.message || 'Failed to load project details.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const blockingQuestions = (openQuestions || []).filter(
+    (q) => q && q.importance && (q.importance.toUpperCase() === 'CRITICAL' || q.importance.toUpperCase() === 'HIGH')
+  );
+
+  const isApproved = project && project.status === 'APPROVED';
+
+  const canApprove =
+    project &&
+    !isApproved &&
+    (project.status === 'REQUIREMENTS_READY' || project.status === 'UNDER_REVIEW') &&
+    blockingQuestions.length === 0;
+
+  // Phase 5: Start editing specification
+  const handleStartEditingSpec = () => {
+    const clone = JSON.parse(JSON.stringify(specification || {}));
+    setEditedSpec(clone);
+    setRawJsonText(JSON.stringify(clone, null, 2));
+    setRawJsonMode(false);
+    setIsEditingSpec(true);
+  };
+
+  const handleUpdateFeature = (index, field, value) => {
+    setEditedSpec((prev) => {
+      const next = { ...prev };
+      const features = [...(next.features || [])];
+      features[index] = { ...features[index], [field]: value };
+      next.features = features;
+      return next;
+    });
+  };
+
+  const handleAddFeature = () => {
+    setEditedSpec((prev) => {
+      const next = { ...prev };
+      const features = [...(next.features || [])];
+      const newId = `FEAT-${String(features.length + 1).padStart(3, '0')}`;
+      features.push({
+        id: newId,
+        name: 'New Feature',
+        category: 'Core',
+        priority: 'MEDIUM',
+        description: 'Describe feature functionality and requirements.'
+      });
+      next.features = features;
+      return next;
+    });
+  };
+
+  const handleRemoveFeature = (index) => {
+    setEditedSpec((prev) => {
+      const next = { ...prev };
+      const features = [...(next.features || [])];
+      features.splice(index, 1);
+      next.features = features;
+      return next;
+    });
+  };
+
+  // Phase 5: Save edited specification
+  const handleSaveSpecification = async () => {
+    let payload = editedSpec;
+    if (rawJsonMode) {
+      try {
+        payload = JSON.parse(rawJsonText);
+      } catch (parseErr) {
+        setAiError(`Invalid JSON format: ${parseErr.message}`);
+        return;
+      }
+    }
+    if (!payload) return;
+
+    setIsSavingSpec(true);
+    setAiError('');
+    setSuccessMessage('');
+    try {
+      const res = await projectService.updateReview(id, payload);
+      setProject((prev) => ({ ...prev, status: res.status }));
+      setSpecification(res.specification);
+      setQualityScore(res.qualityScore);
+      setOpenQuestions(res.openQuestions || []);
+      setIsEditingSpec(false);
+      setRawJsonMode(false);
+      setSuccessMessage(res.message || 'Specification updated and re-evaluated successfully.');
+    } catch (err) {
+      setAiError(err.message || 'Failed to update specification. Please verify your edits.');
+    } finally {
+      setIsSavingSpec(false);
+    }
+  };
+
+  // Phase 5: Approve requirements explicitly
+  const handleApproveProject = async () => {
+    setIsApproving(true);
+    setApprovalError('');
+    try {
+      const res = await projectService.approveProject(id, true);
+      setProject((prev) => ({ ...prev, status: res.status }));
+      setSpecification(res.specification);
+      setQualityScore(res.qualityScore);
+      setShowApprovalModal(false);
+      setSuccessMessage(res.message || 'Project requirements explicitly approved! Specification locked as single source of truth.');
+    } catch (err) {
+      setApprovalError(err.message || 'Failed to approve project requirements.');
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  // Phase 6: Generate documentation
+  const handleGenerateDocs = async () => {
+    setIsGeneratingDocs(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const res = await projectService.generateDocuments(id);
+      setProject((prev) => ({ ...prev, status: res.status }));
+      setDocuments(res.documents || []);
+      setSuccessMessage(res.message || `Successfully generated ${res.documentsCount} documentation files!`);
+    } catch (err) {
+      setError(err.message || 'Failed to generate documentation.');
+    } finally {
+      setIsGeneratingDocs(false);
+    }
+  };
+
+  const handleViewDoc = async (docSummary) => {
+    setSelectedDoc({ ...docSummary, content: '' });
+    setIsViewerOpen(true);
+    setDocLoading(true);
+    try {
+      const fullDoc = await projectService.getDocument(docSummary.id);
+      setSelectedDoc(fullDoc);
+    } catch (err) {
+      setError('Failed to fetch document content: ' + err.message);
+      setIsViewerOpen(false);
+    } finally {
+      setDocLoading(false);
     }
   };
 
@@ -260,6 +436,57 @@ export function ProjectDetailsPage({ initialEdit = false }) {
             </button>
           )}
 
+          {/* Phase 5 Approval CTA */}
+          {(project.status === 'REQUIREMENTS_READY' || project.status === 'UNDER_REVIEW') && (
+            <button
+              onClick={() => {
+                setApprovalError('');
+                setShowApprovalModal(true);
+              }}
+              disabled={!canApprove}
+              className="btn btn-primary"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: canApprove
+                  ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                  : 'var(--bg-tertiary)',
+                color: canApprove ? '#fff' : 'var(--text-muted)',
+                border: 'none',
+                cursor: canApprove ? 'pointer' : 'not-allowed',
+              }}
+              title={
+                blockingQuestions.length > 0
+                  ? `${blockingQuestions.length} blocking question(s) must be resolved before approval`
+                  : 'Approve final requirements specification'
+              }
+            >
+              <ShieldCheck size={16} />
+              <span>
+                {blockingQuestions.length > 0
+                  ? `Approve (${blockingQuestions.length} Blocking)`
+                  : 'Approve Requirements'}
+              </span>
+            </button>
+          )}
+
+          {isApproved && (
+            <span
+              className="badge badge-success"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                fontSize: '0.85rem',
+              }}
+            >
+              <Lock size={14} />
+              <span>Approved & Locked</span>
+            </span>
+          )}
+
           {!isEditing ? (
             canEdit && (
               <button
@@ -327,6 +554,135 @@ export function ProjectDetailsPage({ initialEdit = false }) {
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', maxWidth: '600px', margin: '0 auto' }}>
             The AI Requirement Analyzer is decomposing your project intake into prioritized features, domain modules, database schemas, and REST APIs.
           </p>
+        </div>
+      )}
+
+      {/* Phase 6 Generating In-Progress Banner */}
+      {project.status === 'GENERATING' && (
+        <div className="card" style={{ padding: '24px', marginBottom: '24px', background: 'rgba(99, 102, 241, 0.08)', borderColor: 'rgba(99, 102, 241, 0.3)', textAlign: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '8px' }}>
+            <RefreshCw size={20} className="spin" color="#818cf8" />
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#c7d2fe', margin: 0 }}>
+              Generating Consistent Markdown Documentation...
+            </h3>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', maxWidth: '600px', margin: '0 auto' }}>
+            Planning document set, generating structured Markdown from the approved specification, and verifying cross-document consistency.
+          </p>
+        </div>
+      )}
+
+      {/* Phase 5/6 Approved State Banner */}
+      {isApproved && (
+        <div className="card" style={{ padding: '20px 24px', marginBottom: '24px', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{ background: 'rgba(16, 185, 129, 0.2)', padding: '10px', borderRadius: '50%', color: '#34d399' }}>
+              <CheckCircle2 size={24} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#34d399', margin: '0 0 4px 0' }}>
+                Requirements Approved — Single Source of Truth Locked
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: 0 }}>
+                This specification has been human-reviewed and explicitly approved. Ready to generate the complete Markdown documentation package.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleGenerateDocs}
+            disabled={isGeneratingDocs}
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', border: 'none', color: '#fff', padding: '10px 20px', fontWeight: 700 }}
+          >
+            <Sparkles size={16} />
+            <span>{isGeneratingDocs ? 'Generating Documentation...' : 'Generate Documentation'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Phase 6 Generated State Banner */}
+      {project.status === 'GENERATED' && (
+        <div className="card" style={{ padding: '20px 24px', marginBottom: '24px', background: 'rgba(99, 102, 241, 0.1)', borderColor: 'rgba(99, 102, 241, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{ background: 'rgba(99, 102, 241, 0.2)', padding: '10px', borderRadius: '50%', color: '#818cf8' }}>
+              <BookOpen size={24} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#c7d2fe', margin: '0 0 4px 0' }}>
+                Documentation Generated ({documents.length} Files Ready)
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: 0 }}>
+                All standard and specialized Markdown documents have been verified and generated from the approved specification.
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Link
+              to={`/projects/${id}/workspace`}
+              className="btn btn-primary"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', textDecoration: 'none' }}
+            >
+              <Edit3 size={15} />
+              <span>Open Markdown Workspace</span>
+            </Link>
+            <button
+              onClick={handleGenerateDocs}
+              disabled={isGeneratingDocs}
+              className="btn btn-ghost"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
+              <RefreshCw size={14} className={isGeneratingDocs ? 'spin' : ''} />
+              <span>{isGeneratingDocs ? 'Regenerating...' : 'Regenerate Documentation'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Phase 5 Under Review Banner */}
+      {project.status === 'UNDER_REVIEW' && (
+        <div className="card" style={{ padding: '18px 22px', marginBottom: '24px', background: 'rgba(245, 158, 11, 0.08)', borderColor: 'rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <AlertTriangle size={22} color="#f59e0b" style={{ flexShrink: 0 }} />
+            <div>
+              <h4 style={{ fontSize: '0.975rem', fontWeight: 700, color: '#fbbf24', margin: '0 0 2px 0' }}>
+                Human-in-the-Loop Review: Action Required
+              </h4>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: 0 }}>
+                There {blockingQuestions.length === 1 ? 'is' : 'are'} {blockingQuestions.length} unresolved blocking architectural question(s). Answer questions below or edit the specification before approving.
+              </p>
+            </div>
+          </div>
+          <span className="badge badge-warning" style={{ fontSize: '0.75rem' }}>
+            Approval Blocked
+          </span>
+        </div>
+      )}
+
+      {/* Phase 5 Requirements Ready Banner */}
+      {project.status === 'REQUIREMENTS_READY' && (
+        <div className="card" style={{ padding: '18px 22px', marginBottom: '24px', background: 'rgba(99, 102, 241, 0.08)', borderColor: 'rgba(99, 102, 241, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Sparkles size={22} color="#818cf8" style={{ flexShrink: 0 }} />
+            <div>
+              <h4 style={{ fontSize: '0.975rem', fontWeight: 700, color: '#c7d2fe', margin: '0 0 2px 0' }}>
+                Specification Ready for Human Review & Approval
+              </h4>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: 0 }}>
+                Review the requirements, edit any section if needed, and explicitly approve when satisfied.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setApprovalError('');
+              setShowApprovalModal(true);
+            }}
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', border: 'none', color: '#fff' }}
+          >
+            <ShieldCheck size={16} />
+            <span>Approve Requirements</span>
+          </button>
         </div>
       )}
 
@@ -472,6 +828,7 @@ export function ProjectDetailsPage({ initialEdit = false }) {
                 </h1>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span className={`badge ${
+                    project.status === 'APPROVED' ? 'badge-success' :
                     project.status === 'REQUIREMENTS_READY' ? 'badge-success' :
                     project.status === 'READY_FOR_ANALYSIS' ? 'badge-primary' :
                     project.status === 'UNDER_REVIEW' ? 'badge-warning' :
@@ -605,6 +962,79 @@ export function ProjectDetailsPage({ initialEdit = false }) {
             </div>
           )}
 
+          {/* Phase 6: Generated Documentation Package */}
+          {project.status === 'GENERATED' && documents.length > 0 && (
+            <div className="card" style={{ padding: '28px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <BookOpen size={22} color="#6366f1" />
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+                    Generated Documentation Package ({documents.length} Files)
+                  </h3>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Link
+                    to={`/projects/${id}/workspace`}
+                    className="btn btn-primary"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', padding: '6px 12px', textDecoration: 'none' }}
+                  >
+                    <Edit3 size={14} />
+                    <span>Open Workspace</span>
+                  </Link>
+                  <span className="badge badge-success" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Check size={12} />
+                    <span>Verified & Consistent</span>
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '14px' }}>
+                {documents.map((doc) => (
+                  <div
+                    key={doc.id}
+                    style={{
+                      padding: '16px',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-color)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                          {doc.filename}
+                        </span>
+                        <span className="badge badge-primary" style={{ fontSize: '0.7rem' }}>
+                          v{doc.version}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0 0 8px 0', lineHeight: 1.4 }}>
+                        {doc.description}
+                      </p>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {doc.characterCount ? doc.characterCount.toLocaleString() : 0} characters
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleViewDoc(doc)}
+                      className="btn btn-ghost"
+                      style={{ fontSize: '0.8rem', padding: '6px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', width: '100%' }}
+                    >
+                      <Eye size={14} />
+                      <span>View Content</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Structured Specification Section */}
           {specification ? (
             <div className="card" style={{ padding: '28px' }}>
@@ -615,53 +1045,204 @@ export function ProjectDetailsPage({ initialEdit = false }) {
                     Structured Project Specification
                   </h3>
                 </div>
-                <span className="badge badge-success" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Check size={12} />
-                  <span>Single Source of Truth</span>
-                </span>
-              </div>
-
-              {/* Specification Sub-navigation Tabs */}
-              <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '20px', overflowX: 'auto' }}>
-                {[
-                  { id: 'features', label: 'Features' },
-                  { id: 'modules', label: 'Modules' },
-                  { id: 'tech', label: 'Tech Stack' },
-                  { id: 'database', label: 'Database' },
-                  { id: 'apis', label: 'APIs' },
-                  { id: 'security', label: 'Security & Testing' },
-                  { id: 'risks', label: 'Risks & Assumptions' }
-                ].map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveSpecTab(tab.id)}
-                    className={`btn ${activeSpecTab === tab.id ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ fontSize: '0.85rem', padding: '6px 14px' }}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Tab: Features */}
-              {activeSpecTab === 'features' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {specification.features && Array.isArray(specification.features) ? (
-                    specification.features.map(f => (
-                      <div key={f.id || f.name} style={{ padding: '14px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                          <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{f.id}: {f.name}</span>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <span className="badge badge-primary" style={{ fontSize: '0.7rem' }}>{f.category}</span>
-                            <span className="badge badge-ghost" style={{ fontSize: '0.7rem' }}>{f.priority}</span>
-                          </div>
-                        </div>
-                        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{f.description}</p>
-                      </div>
-                    ))
-                  ) : <p style={{ color: 'var(--text-muted)' }}>No features extracted.</p>}
+                <div>
+                  {isApproved ? (
+                    <span className="badge badge-success" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Lock size={13} />
+                      <span>Approved & Locked (Single Source of Truth)</span>
+                    </span>
+                  ) : isEditingSpec ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!rawJsonMode) {
+                            setRawJsonText(JSON.stringify(editedSpec, null, 2));
+                          } else {
+                            try {
+                              const parsed = JSON.parse(rawJsonText);
+                              setEditedSpec(parsed);
+                            } catch (e) {
+                              // keep raw
+                            }
+                          }
+                          setRawJsonMode(!rawJsonMode);
+                        }}
+                        className="btn btn-ghost"
+                        style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                      >
+                        <Code size={14} style={{ marginRight: '4px' }} />
+                        {rawJsonMode ? 'Visual Form Mode' : 'Raw JSON Mode'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditingSpec(false);
+                          setRawJsonMode(false);
+                          setEditedSpec(null);
+                        }}
+                        disabled={isSavingSpec}
+                        className="btn btn-ghost"
+                        style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveSpecification}
+                        disabled={isSavingSpec}
+                        className="btn btn-primary"
+                        style={{ fontSize: '0.8rem', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <Check size={14} />
+                        <span>{isSavingSpec ? 'Saving...' : 'Save & Re-evaluate'}</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <button
+                        type="button"
+                        onClick={handleStartEditingSpec}
+                        className="btn btn-ghost"
+                        style={{ fontSize: '0.85rem', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <Edit3 size={14} />
+                        <span>Edit Specification</span>
+                      </button>
+                      <span className="badge badge-secondary" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Check size={12} />
+                        <span>Draft Specification</span>
+                      </span>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+
+              {/* Raw JSON Editor when active */}
+              {isEditingSpec && rawJsonMode ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>
+                    Directly modify the JSON specification below. Changes will be validated and re-evaluated by the backend.
+                  </p>
+                  <textarea
+                    value={rawJsonText}
+                    onChange={(e) => setRawJsonText(e.target.value)}
+                    rows={18}
+                    className="form-input"
+                    style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', lineHeight: 1.5 }}
+                  />
+                </div>
+              ) : (
+                <>
+                  {/* Specification Sub-navigation Tabs */}
+                  <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '20px', overflowX: 'auto' }}>
+                    {[
+                      { id: 'features', label: 'Features' },
+                      { id: 'modules', label: 'Modules' },
+                      { id: 'tech', label: 'Tech Stack' },
+                      { id: 'database', label: 'Database' },
+                      { id: 'apis', label: 'APIs' },
+                      { id: 'security', label: 'Security & Testing' },
+                      { id: 'risks', label: 'Risks & Assumptions' }
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveSpecTab(tab.id)}
+                        className={`btn ${activeSpecTab === tab.id ? 'btn-primary' : 'btn-ghost'}`}
+                        style={{ fontSize: '0.85rem', padding: '6px 14px' }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Tab: Features */}
+                  {activeSpecTab === 'features' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {isEditingSpec && editedSpec ? (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                              Editing Features ({editedSpec.features?.length || 0})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleAddFeature}
+                              className="btn btn-ghost"
+                              style={{ fontSize: '0.8rem', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              <Plus size={14} /> Add Feature
+                            </button>
+                          </div>
+                          {editedSpec.features && editedSpec.features.map((f, idx) => (
+                            <div key={idx} style={{ padding: '16px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <input
+                                  type="text"
+                                  value={f.name}
+                                  onChange={(e) => handleUpdateFeature(idx, 'name', e.target.value)}
+                                  placeholder="Feature Name"
+                                  className="form-input"
+                                  style={{ flex: 2, minWidth: '200px' }}
+                                />
+                                <input
+                                  type="text"
+                                  value={f.category}
+                                  onChange={(e) => handleUpdateFeature(idx, 'category', e.target.value)}
+                                  placeholder="Category (e.g. Core, Auth)"
+                                  className="form-input"
+                                  style={{ flex: 1, minWidth: '130px' }}
+                                />
+                                <select
+                                  value={f.priority}
+                                  onChange={(e) => handleUpdateFeature(idx, 'priority', e.target.value)}
+                                  className="form-input"
+                                  style={{ width: '130px' }}
+                                >
+                                  <option value="CRITICAL">CRITICAL</option>
+                                  <option value="HIGH">HIGH</option>
+                                  <option value="MEDIUM">MEDIUM</option>
+                                  <option value="LOW">LOW</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveFeature(idx)}
+                                  className="btn btn-ghost"
+                                  style={{ color: '#ef4444', padding: '6px' }}
+                                  title="Remove feature"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                              <textarea
+                                value={f.description}
+                                onChange={(e) => handleUpdateFeature(idx, 'description', e.target.value)}
+                                placeholder="Feature description..."
+                                className="form-input"
+                                rows={2}
+                              />
+                            </div>
+                          ))}
+                        </>
+                      ) : (
+                        specification.features && Array.isArray(specification.features) ? (
+                          specification.features.map(f => (
+                            <div key={f.id || f.name} style={{ padding: '14px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{f.id}: {f.name}</span>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <span className="badge badge-primary" style={{ fontSize: '0.7rem' }}>{f.category}</span>
+                                  <span className="badge badge-ghost" style={{ fontSize: '0.7rem' }}>{f.priority}</span>
+                                </div>
+                              </div>
+                              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{f.description}</p>
+                            </div>
+                          ))
+                        ) : <p style={{ color: 'var(--text-muted)' }}>No features extracted.</p>
+                      )}
+                    </div>
+                  )}
 
               {/* Tab: Modules */}
               {activeSpecTab === 'modules' && (
@@ -802,6 +1383,8 @@ export function ProjectDetailsPage({ initialEdit = false }) {
                   )}
                 </div>
               )}
+                </>
+              )}
             </div>
           ) : (
             /* Prompt to Analyze */
@@ -849,6 +1432,27 @@ export function ProjectDetailsPage({ initialEdit = false }) {
 
         </div>
       )}
+
+      {/* Phase 5: Human-in-the-Loop Explicit Approval Modal */}
+      <ApprovalModal
+        isOpen={showApprovalModal}
+        onClose={() => setShowApprovalModal(false)}
+        onConfirm={handleApproveProject}
+        loading={isApproving}
+        error={approvalError}
+        projectName={project?.name}
+        qualityScore={qualityScore || 80}
+        blockingCount={blockingQuestions.length}
+        featuresCount={specification?.features?.length || 0}
+      />
+
+      {/* Phase 6: Markdown Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={isViewerOpen}
+        onClose={() => setIsViewerOpen(false)}
+        document={selectedDoc}
+        loading={docLoading}
+      />
     </div>
   );
 }

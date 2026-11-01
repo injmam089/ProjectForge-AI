@@ -241,6 +241,10 @@ public class ProjectService {
         Project project = projectRepository.findByIdAndUserId(projectId, user.getId())
                 .orElseThrow(() -> new ProjectNotFoundException(projectId));
 
+        if (!project.getStatus().canEditSpecification()) {
+            throw new InvalidProjectStateException("Cannot update specification for project in protected status: " + project.getStatus());
+        }
+
         String serializedSpec;
         try {
             serializedSpec = objectMapper.writeValueAsString(request.specification());
