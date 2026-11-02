@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AlertTriangle, Trash2, X } from 'lucide-react';
 
 export function DeleteConfirmModal({
@@ -10,6 +10,17 @@ export function DeleteConfirmModal({
 }) {
   const [confirmName, setConfirmName] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !loading) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, loading, onClose]);
 
   if (!isOpen || !project) return null;
 
@@ -28,6 +39,9 @@ export function DeleteConfirmModal({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-project-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -72,7 +86,7 @@ export function DeleteConfirmModal({
               <AlertTriangle size={22} />
             </div>
             <div>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+              <h3 id="delete-project-title" style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
                 Delete Project
               </h3>
               <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', margin: 0 }}>
@@ -86,6 +100,7 @@ export function DeleteConfirmModal({
             disabled={loading}
             className="btn btn-ghost"
             style={{ padding: '6px', color: 'var(--text-muted)' }}
+            aria-label="Close modal"
           >
             <X size={18} />
           </button>

@@ -18,23 +18,32 @@ Modular monolith for V1 to ensure strict type safety, transaction consistency, s
 ## 3. Layered Package Architecture
 
 ### 3.1 Backend Packages (`com.projectforge`)
-- `config/`: Application, Web MVC, and CORS configurations
-- `controller/`: REST controllers (`AuthController`, `ProjectController`, `ProjectSpecificationController`, `HealthController`)
-- `service/`: Transactional business logic (`AuthService`, `ProjectService`, `ProjectRequirementsService`, `ProjectSpecificationService`)
-- `repository/`: Spring Data JPA interfaces (`UserRepository`, `ProjectRepository`)
-- `entity/`: Relational domain entities (`User`, `Project`, `Role`, `ProjectStatus`, `ProjectType`, `ProjectDifficulty`)
-- `dto/`: Immutable request and response records (including `RequirementsAnalysisResponse`, `ClarificationRequest`, `OpenQuestionDto`)
-- `security/`: Filter chain, JWT service, user details service, and authentication entry point
-- `exception/`: Centralized exception models (`AIServiceException`, `AIValidationException`) and `GlobalExceptionHandler`
+- `config/`: Application, Web MVC, and CORS configurations (`ApplicationConfig`, `WebMvcConfig`, `CorsConfig`, `OpenAIConfig`, `JacksonConfig`)
+- `controller/`: REST controllers (`AuthController`, `ProjectController`, `ProjectSpecificationController`, `DocumentController`, `ExportController`, `HealthController`)
+- `service/`: Transactional business logic (`AuthService`, `ProjectService`, `ProjectRequirementsService`, `ProjectSpecificationService`, `DocumentService`, `DocumentAiEditService`, `ProjectHistoryService`)
+- `repository/`: Spring Data JPA interfaces (`UserRepository`, `ProjectRepository`, `DocumentRepository`, `DocumentVersionRepository`, `ProjectHistoryRepository`)
+- `entity/`: Relational domain entities (`User`, `Project`, `Document`, `DocumentVersion`, `ProjectHistory`, `DocumentType`, `DocumentChangeType`, `ProjectHistoryEventType`, `ProjectStatus`, `ProjectType`, `ProjectDifficulty`)
+- `dto/`: Immutable request and response records (`RequirementsAnalysisResponse`, `ClarificationRequest`, `OpenQuestionDto`, `QualityScoreDto`, `DocumentDto`, `DocumentVersionDto`, `ProjectHistoryDto`, `ProjectStatsDto`, `ExportManifestDto`, `AiEditRequest`)
+- `security/`: Filter chain, JWT service, user details service, and authentication entry point (`JwtAuthenticationFilter`, `JwtService`, `CustomUserDetailsService`, `AuthEntryPoint`)
+- `exception/`: Centralized exception models (`AIServiceException`, `AIValidationException`, `ResourceNotFoundException`) and `GlobalExceptionHandler`
 - `ai/`: AI requirement intelligence subsystem (`AIService`, `OpenAIService`, `RequirementAnalyzer`, `ClarificationEngine`, `RequirementValidator`, `QualityEvaluator`, `PromptLoader`)
+- `markdown/`: Markdown document generation engine (`DocumentGenerationService`, `DocumentContentGenerator`, `GeneratorUtils`, `SafeFilenameService`)
+  - `markdown/generator/`: Core document generators (`CoreDocumentGenerators`, `SpecializedDocumentGenerators`)
+- `export/`: ZIP package generation (`ExportService`, `ExportValidator`, `ExportManifestBuilder`, `ZipPackageBuilder`)
+- `requirement/`: Requirements processing pipeline (`RequirementProcessingService`, `ClarificationSessionManager`)
 
 ### 3.2 Frontend Structure (`frontend/src/`)
-- `components/`: UI building blocks (`Header`, `Footer`, `AuthModal`, `ProjectCreationCard`, `ProjectDetailsModal`, `ProjectsOverview`, `EmptyState`, `SystemStatusBadge`)
-- `pages/`: Route views (`DashboardPage`, `ProjectDetailsPage`, `DocsPage`, `NotFoundPage`)
+- `components/`: UI building blocks
+  - Core: `Header`, `Footer`, `AuthModal`, `EmptyState`, `LoadingSpinner`, `ErrorBoundary`
+  - Project: `ProjectCreationCard`, `ProjectDetailsModal`, `ProjectsOverview`, `ProjectCard`, `ProjectStatsBar`
+  - Workspace: `MarkdownWorkspace`, `DocumentSidebar`, `DocumentEditor`, `MarkdownPreview`, `SafeMarkdownRenderer`, `AiEditPanel`, `VersionHistoryPanel`, `ExportModal`
+  - Dashboard: `DashboardFilters`, `DashboardSearch`, `ProjectHistoryPanel`
+  - Utility: `SystemStatusBadge`, `ConfirmationModal`, `StatusBadge`
+- `pages/`: Route views (`DashboardPage`, `ProjectDetailsPage`, `MarkdownWorkspacePage`, `NotFoundPage`)
 - `layouts/`: Master frame layouts (`MainLayout`)
-- `services/`: API communication client layer (`api.js`, `authService.js`, `projectService.js`, `healthService.js`)
-- `hooks/`: Reusable hooks (`useHealthCheck.js`)
-- `utils/`: Constants, enums, and configuration
+- `services/`: API communication client layer (`api.js`, `authService.js`, `projectService.js`, `documentService.js`, `exportService.js`, `healthService.js`)
+- `hooks/`: Reusable hooks (`useHealthCheck.js`, `useDocuments.js`, `useProjectHistory.js`, `useDebounce.js`)
+- `utils/`: Constants, enums, configuration, and helper functions
 - `styles/`: Clean modular CSS variables, animations, and typography
 
 ---

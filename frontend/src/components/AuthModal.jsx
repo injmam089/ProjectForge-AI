@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Lock, Mail, User, AlertCircle, ArrowRight } from 'lucide-react';
 import { authService } from '../services/authService';
 
@@ -9,6 +9,17 @@ export function AuthModal({ isOpen, onClose, onSuccess }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !loading) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, loading, onClose]);
 
   if (!isOpen) return null;
 
@@ -41,6 +52,9 @@ export function AuthModal({ isOpen, onClose, onSuccess }) {
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auth-modal-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -67,7 +81,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
           <div>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            <h2 id="auth-modal-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               {isRegister ? 'Create an Account' : 'Sign in to ProjectForge'}
             </h2>
             <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: '4px' }}>
@@ -78,7 +92,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }) {
             onClick={onClose}
             className="btn btn-ghost"
             style={{ padding: '6px', borderRadius: '50%' }}
-            aria-label="Close"
+            aria-label="Close authentication modal"
           >
             <X size={18} />
           </button>

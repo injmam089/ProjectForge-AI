@@ -330,7 +330,7 @@ try {
 
     # Safe Cascade Deletion
     Write-Host "[15/16] Testing safe cascade deletion (DELETE /api/projects/{id})..."
-    $delResponse = Invoke-WebRequest -Uri "$baseUrl/api/projects/$($alphaP3.id)" -Method Delete -Headers $alphaHeaders
+    $delResponse = Invoke-WebRequest -Uri "$baseUrl/api/projects/$($alphaP3.id)" -Method Delete -Headers $alphaHeaders -UseBasicParsing
     if ($delResponse.StatusCode -ne 204) {
         Write-Error "Expected 204 No Content for deletion, got $($delResponse.StatusCode)"
         exit 1

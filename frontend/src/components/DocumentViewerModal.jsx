@@ -1,8 +1,19 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, FileText, Copy, Check } from 'lucide-react';
 
 export function DocumentViewerModal({ isOpen, onClose, document, loading }) {
   const [copied, setCopied] = React.useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -16,6 +27,9 @@ export function DocumentViewerModal({ isOpen, onClose, document, loading }) {
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="doc-viewer-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -60,9 +74,9 @@ export function DocumentViewerModal({ isOpen, onClose, document, loading }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <FileText size={20} color="#6366f1" />
             <div>
-              <div style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary, #f8fafc)', fontFamily: 'var(--font-mono)' }}>
+              <h3 id="doc-viewer-title" style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary, #f8fafc)', fontFamily: 'var(--font-mono)', margin: 0 }}>
                 {document?.filename || 'Document'}
-              </div>
+              </h3>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)' }}>
                 {document?.type} • {document?.characterCount || document?.content?.length || 0} characters
               </div>
@@ -87,6 +101,7 @@ export function DocumentViewerModal({ isOpen, onClose, document, loading }) {
               onClick={onClose}
               className="btn btn-ghost"
               style={{ padding: '6px' }}
+              aria-label="Close document viewer modal"
               title="Close modal"
             >
               <X size={18} />

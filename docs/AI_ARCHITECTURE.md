@@ -21,7 +21,7 @@ Raw LLM Response JSON (cleans markdown fences if present)
 RequirementValidator (Structural completeness, non-empty critical sections & fields)
       │
       ▼
-QualityEvaluator (Deterministic scoring 0-100 across completeness, clarity, security, risk)
+QualityEvaluator (Deterministic scoring 0-100 across six dimensions: completeness, clarity, consistency, technical feasibility, security coverage, testability)
       │
       ▼
 Project Entity Persistence (Stores specification JSON in PostgreSQL project_specification)
@@ -37,7 +37,7 @@ REQUIREMENTS_READY (Single Source of Truth locked for Phase 5+)
 - **Requirement Analyzer** (`com.projectforge.ai.RequirementAnalyzer`): Converts project intake into a domain-specific structured specification containing features, modules, entities, APIs, security, testing, and open questions.
 - **Clarification Engine** (`com.projectforge.ai.ClarificationEngine`): Refines an existing specification with user-provided answers to open questions, removing resolved questions and increasing quality score.
 - **Requirement Validator** (`com.projectforge.ai.RequirementValidator`): Enforces that specifications meet all schema requirements, non-empty arrays, and structural invariants before persistence.
-- **Quality Evaluator** (`com.projectforge.ai.QualityEvaluator`): Deterministically evaluates four dimensions (Completeness: 35, Clarity: 25, Security: 20, Risk Resolution: 20) on a 0–100 scale.
+- **Quality Evaluator** (`com.projectforge.ai.QualityEvaluator`): Deterministically evaluates six dimensions on a 0–100 scale: Completeness (25 pts), Clarity (15 pts), Consistency (15 pts), Technical Feasibility (15 pts), Security Coverage (15 pts), and Testability (15 pts). Unresolved open questions apply deductions (CRITICAL: −5, HIGH: −3). The overall score is clamped to a minimum of 10.
 - **Prompt Loader** (`com.projectforge.ai.PromptLoader`): Loads cached prompt templates from `resources/prompts/`.
 - **OpenAI Service** (`com.projectforge.ai.OpenAIService`): Server-side HTTPS client connecting to OpenAI Chat Completions API with timeouts, rate limit defense, and safe error propagation.
 

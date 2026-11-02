@@ -18,6 +18,53 @@ services:
       retries: 5
       start_period: 10s
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: projectforge-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-projectforge}
+      DB_USERNAME: ${POSTGRES_USER:-projectforge_user}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-projectforge_password}
+      JWT_SECRET: ${JWT_SECRET:-DefaultDevSecureJwtSecretKeyForProjectForgeAiMustBeAtLeastSixtyFourBytesLong1234567890}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost,http://localhost:80,http://localhost:5173}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: projectforge-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   postgres_data:
     name: projectforge_postgres_data

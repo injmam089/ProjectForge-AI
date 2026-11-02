@@ -105,6 +105,17 @@ export function ProjectHistoryModal({
     }
   }, [isOpen, projectId]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const loadHistory = async (pageNum = 0) => {
     setLoading(true);
     setError('');
@@ -129,6 +140,9 @@ export function ProjectHistoryModal({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="project-history-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -186,7 +200,7 @@ export function ProjectHistoryModal({
               <History size={18} />
             </div>
             <div>
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+              <h3 id="project-history-title" style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
                 Project Activity & History
               </h3>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
@@ -199,6 +213,7 @@ export function ProjectHistoryModal({
             onClick={onClose}
             className="btn btn-ghost"
             style={{ padding: '6px', color: 'var(--text-muted)' }}
+            aria-label="Close history modal"
           >
             <X size={18} />
           </button>

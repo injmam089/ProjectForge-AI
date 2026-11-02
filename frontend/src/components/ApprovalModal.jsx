@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, ShieldCheck, CheckCircle2, AlertTriangle, Lock } from 'lucide-react';
 
 export function ApprovalModal({
@@ -14,6 +14,17 @@ export function ApprovalModal({
 }) {
   const [confirmed, setConfirmed] = useState(false);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !loading) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, loading, onClose]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e) => {
@@ -24,6 +35,9 @@ export function ApprovalModal({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="approval-modal-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -51,6 +65,7 @@ export function ApprovalModal({
         <button
           onClick={onClose}
           disabled={loading}
+          aria-label="Close approval modal"
           style={{
             position: 'absolute',
             top: '20px',
@@ -80,7 +95,7 @@ export function ApprovalModal({
             <ShieldCheck size={24} />
           </div>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+            <h3 id="approval-modal-title" style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
               Approve Project Requirements
             </h3>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>

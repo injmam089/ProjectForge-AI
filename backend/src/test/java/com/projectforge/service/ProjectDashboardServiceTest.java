@@ -172,15 +172,14 @@ class ProjectDashboardServiceTest {
     }
 
     @Test
-    @DisplayName("6. Unsafe sort field falls back safely to updatedAt (no SQL injection)")
-    @SuppressWarnings("unchecked")
+    @DisplayName("6. Unsafe sort field rejects unauthorized field (SQL injection defense)")
     void sorting_safeAllowlistFallback() {
-        List<ProjectSummaryResponse> results = (List<ProjectSummaryResponse>) projectService.searchAndFilterProjects(
-                userAlpha.getEmail(), null, null, null, null, "'; DROP TABLE projects; --", "desc", null, null
-        );
-
-        assertThat(results).hasSize(3);
-        assertThat(results.get(0).name()).isEqualTo("CloudPulse Telemetry");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                projectService.searchAndFilterProjects(
+                        userAlpha.getEmail(), null, null, null, null, "'; DROP TABLE projects; --", "desc", null, null
+                )
+        ).isInstanceOf(IllegalArgumentException.class)
+         .hasMessageContaining("Invalid sort field");
     }
 
     @Test

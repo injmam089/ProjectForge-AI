@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Archive, X, Loader2, AlertTriangle, ShieldCheck, FileText, CheckCircle2 } from 'lucide-react';
 
 export function ExportZipModal({
@@ -12,10 +12,24 @@ export function ExportZipModal({
   error = null,
   success = false,
 }) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !loading) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, loading, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="export-zip-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -49,9 +63,9 @@ export function ExportZipModal({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#38bdf8' }}>
             <Archive size={22} />
-            <span style={{ fontWeight: 700, fontSize: '1.05rem', color: '#f8fafc' }}>
+            <h3 id="export-zip-title" style={{ fontWeight: 700, fontSize: '1.05rem', color: '#f8fafc', margin: 0 }}>
               Export Project Documentation
-            </span>
+            </h3>
           </div>
           {!loading && (
             <button
@@ -59,6 +73,7 @@ export function ExportZipModal({
               onClick={onClose}
               className="btn btn-ghost"
               style={{ padding: '4px' }}
+              aria-label="Close export modal"
               title="Close modal"
             >
               <X size={16} />

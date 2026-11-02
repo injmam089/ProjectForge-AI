@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, RotateCcw, Copy, Check, FileText } from 'lucide-react';
 import { SafeMarkdownRenderer } from './SafeMarkdownRenderer';
 
@@ -10,6 +10,17 @@ export function VersionPreviewModal({
 }) {
   const [copied, setCopied] = React.useState(false);
   const [viewRaw, setViewRaw] = React.useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen || !versionData) return null;
 
@@ -23,6 +34,9 @@ export function VersionPreviewModal({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="version-preview-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -67,9 +81,9 @@ export function VersionPreviewModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <FileText size={18} color="#6366f1" />
             <div>
-              <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f8fafc' }}>
+              <h3 id="version-preview-title" style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f8fafc', margin: 0 }}>
                 Historical Snapshot: Version {versionData.version}
-              </div>
+              </h3>
               <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
                 {versionData.changeType} • {versionData.characterCount || versionData.content?.length || 0} characters • Created by {versionData.createdBy}
               </div>
@@ -157,6 +171,7 @@ export function VersionPreviewModal({
               onClick={onClose}
               className="btn btn-ghost"
               style={{ padding: '6px' }}
+              aria-label="Close modal"
               title="Close modal"
             >
               <X size={18} />

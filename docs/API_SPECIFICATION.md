@@ -604,8 +604,10 @@ All review and approval endpoints require `Authorization: Bearer <token>`.
 
 ---
 
-## 5. Planned Future Endpoints (Phase 10+)
+## 5. Security & Rate Limiting
 
-### Future Integrations
-- GitHub & VCS Repository Creation (Phase 10)
-- End-to-End Orchestration & Polish (Phase 11)
+- **Authentication**: Stateless HMAC-SHA512 JWT transmitted in `Authorization: Bearer <token>` header.
+- **Authorization**: Anti-IDOR tenant isolation enforced on every project, document, version, history, and export endpoint. Accessing unowned resources yields `404 Not Found`.
+- **Input Sanitization**: Strict allowlist for sort parameters (`updatedAt`, `createdAt`, `name`, `status`), bounded page size (1..100), bounded search query length (<=100 chars).
+- **Prompt Injection Defense**: Multi-tier boundary isolation with prompt delimiters, markdown formatting constraints, and strict JSON specification schema validation.
+- **Zip Slip Defense**: Normalized archive entry paths preventing directory traversal, path escape, symlink injection, or unbounded archive expansion.
