@@ -51,3 +51,21 @@
   - No environment files (`.env`, `application.properties`), API keys, user passwords, JWT tokens, database connection strings, or system logs are ever included.
 - **Post-Generation Archive Integrity Verification**:
   - After in-memory ZIP package creation, the byte stream is validated with `ZipInputStream` to verify CRC32 integrity, assert entry count matches manifest metadata, and confirm manifest presence prior to sending the HTTP response.
+
+## Dashboard & Project History Security (Phase 9)
+
+- **Anti-IDOR & Information Leakage Prevention**:
+  - All dashboard endpoints (`GET /api/projects`, `GET /api/projects/stats`, `GET /api/projects/{id}/history`, `DELETE /api/projects/{id}`) enforce strict multi-tenant isolation.
+  - Queries are explicitly scoped to `p.user.id = :userId`. Foreign project access returns HTTP `404 Not Found` with zero metadata leakage (preventing enumeration of existence or metadata).
+- **Sort Allowlist & SQL Injection Prevention**:
+  - Sorting parameters are strictly validated against a hardcoded allowlist: `updatedAt`, `createdAt`, `name`, `status`. Any unauthorized sort field is rejected with HTTP `400 Bad Request` or defaulted to `updatedAt`, preventing dynamic SQL injection or unintended database property exposure.
+- **Bounded Inputs & DoS Protection**:
+  - Search queries are clamped to a maximum of 100 characters.
+  - Page sizes are clamped between 1 and 100 items (default 12 or 20).
+  - Negative page numbers are sanitized to 0.
+- **Audit Metadata Sanitization & Storage Limits**:
+  - Project history event metadata is sanitized, trimmed, and strictly bounded to <=4000 characters. Longer strings are safely truncated with an ellipsis (`...`).
+  - History event types are constrained to a controlled enum (`ProjectHistoryEventType`). Arbitrary string injection into event types is impossible.
+- **Safe Cascade Deletion & Audit Integrity**:
+  - Cascade deletion requires explicit confirmation on the frontend (`DeleteConfirmModal`).
+  - Child entities (`DocumentVersion`, `Document`, `ProjectHistory`) are deleted in proper relational dependency order within a single `@Transactional` boundary, preventing orphan records or foreign key constraint violations.

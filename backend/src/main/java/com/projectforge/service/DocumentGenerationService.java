@@ -51,8 +51,8 @@ public class DocumentGenerationService {
     private final MarkdownValidator markdownValidator;
     private final ObjectMapper objectMapper;
     private final DocumentVersionRepository documentVersionRepository;
+    private final ProjectHistoryService projectHistoryService;
 
-    @Autowired
     public DocumentGenerationService(
             ProjectRepository projectRepository,
             UserRepository userRepository,
@@ -63,6 +63,22 @@ public class DocumentGenerationService {
             ObjectMapper objectMapper,
             DocumentVersionRepository documentVersionRepository
     ) {
+        this(projectRepository, userRepository, documentRepository, documentPlanner,
+                markdownGenerator, markdownValidator, objectMapper, documentVersionRepository, null);
+    }
+
+    @Autowired
+    public DocumentGenerationService(
+            ProjectRepository projectRepository,
+            UserRepository userRepository,
+            DocumentRepository documentRepository,
+            DocumentPlanner documentPlanner,
+            MarkdownGenerator markdownGenerator,
+            MarkdownValidator markdownValidator,
+            ObjectMapper objectMapper,
+            DocumentVersionRepository documentVersionRepository,
+            ProjectHistoryService projectHistoryService
+    ) {
         this.projectRepository = projectRepository;
         this.userRepository = userRepository;
         this.documentRepository = documentRepository;
@@ -71,6 +87,7 @@ public class DocumentGenerationService {
         this.markdownValidator = markdownValidator;
         this.objectMapper = objectMapper;
         this.documentVersionRepository = documentVersionRepository;
+        this.projectHistoryService = projectHistoryService;
     }
 
     public DocumentGenerationService(
@@ -82,7 +99,7 @@ public class DocumentGenerationService {
             MarkdownValidator markdownValidator,
             ObjectMapper objectMapper
     ) {
-        this(projectRepository, userRepository, documentRepository, documentPlanner, markdownGenerator, markdownValidator, objectMapper, null);
+        this(projectRepository, userRepository, documentRepository, documentPlanner, markdownGenerator, markdownValidator, objectMapper, null, null);
     }
 
     /**
@@ -165,6 +182,20 @@ public class DocumentGenerationService {
             // 9. Transition project to GENERATED
             project.setStatus(ProjectStatus.GENERATED);
             projectRepository.save(project);
+
+            if (projectHistoryService != null) {
+                try {
+                    projectHistoryService.recordEvent(
+                            project,
+                            com.projectforge.entity.ProjectHistoryEventType.DOCUMENTS_GENERATED,
+                            String.format("%d Markdown documentation files generated from approved specification", savedDocuments.size()),
+                            null,
+                            user.getEmail()
+                    );
+                } catch (Exception e) {
+                    log.warn("Failed to record history event for document generation: {}", e.getMessage());
+                }
+            }
 
             log.info("Successfully generated and persisted {} documents for project id: {}", savedDocuments.size(), projectId);
 

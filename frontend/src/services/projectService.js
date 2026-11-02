@@ -1,8 +1,34 @@
 import { apiClient } from './api';
 
 export const projectService = {
-  async getProjects() {
-    return apiClient('/projects');
+  async getProjects(params = {}) {
+    const query = new URLSearchParams();
+    if (params.page !== undefined && params.page !== null) query.append('page', params.page);
+    if (params.size !== undefined && params.size !== null) query.append('size', params.size);
+    if (params.search) query.append('search', params.search.trim());
+    if (params.status && params.status !== 'ALL') query.append('status', params.status);
+    if (params.type && params.type !== 'ALL') query.append('type', params.type);
+    if (params.difficulty && params.difficulty !== 'ALL') query.append('difficulty', params.difficulty);
+    if (params.sort) query.append('sort', params.sort);
+    if (params.direction) query.append('direction', params.direction);
+
+    const queryString = query.toString();
+    const endpoint = queryString ? `/projects?${queryString}` : '/projects';
+    return apiClient(endpoint);
+  },
+
+  async getProjectStats() {
+    return apiClient('/projects/stats');
+  },
+
+  async getProjectHistory(id, params = {}) {
+    const query = new URLSearchParams();
+    if (params.page !== undefined && params.page !== null) query.append('page', params.page);
+    if (params.size !== undefined && params.size !== null) query.append('size', params.size);
+
+    const queryString = query.toString();
+    const endpoint = queryString ? `/projects/${id}/history?${queryString}` : `/projects/${id}/history`;
+    return apiClient(endpoint);
   },
 
   async getProject(id) {

@@ -26,6 +26,7 @@ public class ExportService {
     private final DocumentRepository documentRepository;
     private final ExportValidator exportValidator;
     private final ZipPackageBuilder zipPackageBuilder;
+    private final com.projectforge.service.ProjectHistoryService projectHistoryService;
 
     public ExportService(
             ProjectRepository projectRepository,
@@ -33,10 +34,22 @@ public class ExportService {
             ExportValidator exportValidator,
             ZipPackageBuilder zipPackageBuilder
     ) {
+        this(projectRepository, documentRepository, exportValidator, zipPackageBuilder, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ExportService(
+            ProjectRepository projectRepository,
+            DocumentRepository documentRepository,
+            ExportValidator exportValidator,
+            ZipPackageBuilder zipPackageBuilder,
+            com.projectforge.service.ProjectHistoryService projectHistoryService
+    ) {
         this.projectRepository = projectRepository;
         this.documentRepository = documentRepository;
         this.exportValidator = exportValidator;
         this.zipPackageBuilder = zipPackageBuilder;
+        this.projectHistoryService = projectHistoryService;
     }
 
     /**
@@ -80,6 +93,20 @@ public class ExportService {
 
         log.info("Project id: {} ('{}') successfully exported as ZIP '{}' ({} documents, {} bytes)",
                 projectId, project.getName(), filename, documents.size(), zipBytes.length);
+
+        if (projectHistoryService != null) {
+            try {
+                projectHistoryService.recordEvent(
+                        project,
+                        com.projectforge.entity.ProjectHistoryEventType.PROJECT_EXPORTED,
+                        String.format("ZIP documentation package '%s' exported (%d files)", filename, documents.size()),
+                        null,
+                        userEmail
+                );
+            } catch (Exception e) {
+                log.warn("Failed to record history event for export: {}", e.getMessage());
+            }
+        }
 
         return new ExportPackage(filename, zipBytes);
     }

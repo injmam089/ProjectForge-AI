@@ -5,7 +5,7 @@ import {
   CheckCircle2, Clock, Calendar, Tag, Layers, Server, 
   HelpCircle, Send, Database, Code, Activity, RefreshCw,
   Check, Lock, ChevronRight, ShieldCheck, AlertTriangle, Plus,
-  FileText, Eye, BookOpen, Download
+  FileText, Eye, BookOpen, Download, History
 } from 'lucide-react';
 import { projectService } from '../services/projectService';
 import { authService } from '../services/authService';
@@ -13,6 +13,7 @@ import { exportService } from '../services/exportService';
 import { ApprovalModal } from '../components/ApprovalModal';
 import { DocumentViewerModal } from '../components/DocumentViewerModal';
 import { ExportZipModal } from '../components/workspace/ExportZipModal';
+import { ProjectHistoryModal, DeleteConfirmModal } from '../components/dashboard';
 import { PROJECT_TYPES, DIFFICULTY_LEVELS } from '../utils/constants';
 
 export function ProjectDetailsPage({ initialEdit = false }) {
@@ -60,6 +61,11 @@ export function ProjectDetailsPage({ initialEdit = false }) {
   const [exportStatusMessage, setExportStatusMessage] = useState('');
   const [exportError, setExportError] = useState(null);
   const [exportSuccess, setExportSuccess] = useState(false);
+
+  // Phase 9 Dashboard & History State
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -323,15 +329,19 @@ export function ProjectDetailsPage({ initialEdit = false }) {
     }
   };
 
-  const handleDelete = async () => {
-    if (!window.confirm(`Are you sure you want to permanently delete "${project.name}"? This action cannot be undone.`)) {
-      return;
-    }
+  const handleDelete = () => {
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = async (projectId) => {
+    setDeleteLoading(true);
     try {
-      await projectService.deleteProject(id);
+      await projectService.deleteProject(projectId);
       navigate('/');
     } catch (err) {
-      setError(err.message || 'Failed to delete project.');
+      throw err;
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -541,6 +551,16 @@ export function ProjectDetailsPage({ initialEdit = false }) {
               Cancel Edit
             </button>
           )}
+
+          <button
+            onClick={() => setShowHistoryModal(true)}
+            className="btn btn-ghost"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            title="View Project Activity History"
+          >
+            <History size={16} />
+            <span>History</span>
+          </button>
 
           <button
             onClick={handleDelete}
@@ -1528,6 +1548,23 @@ export function ProjectDetailsPage({ initialEdit = false }) {
         statusMessage={exportStatusMessage}
         error={exportError}
         success={exportSuccess}
+      />
+
+      {/* Phase 9: Project Activity & History Modal */}
+      <ProjectHistoryModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        projectId={project?.id}
+        projectName={project?.name}
+      />
+
+      {/* Phase 9: Safe Cascade Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleConfirmDelete}
+        project={project}
+        loading={deleteLoading}
       />
     </div>
   );

@@ -241,4 +241,14 @@ http://localhost:5173
   - Read-only immutability invariant: Export operations never mutate specifications or documents
   - Frontend ZIP export modal and download integration in Workspace and Project Details views
 
-- **Phase 9: Dashboard & Project History** — Planned Next
+- **Phase 9: Dashboard & Project History** — COMPLETED & VERIFIED
+  - Enhanced dashboard with search, multi-criteria filtering (status, type, difficulty), sort allowlist, and server-side pagination
+  - User-scoped project analytics and statistics aggregations endpoint (`GET /api/projects/stats`)
+  - Full audit logging subsystem (`ProjectHistory`) tracking 11 lifecycle milestones and workspace mutations
+  - Project activity timeline modal (`ProjectHistoryModal`) with chronologically ordered events, user attribution, and expandable metadata
+  - Safe enterprise cascade deletion (`DeleteConfirmModal`) removing child documents, document versions, history records, and projects within an atomic transaction
+  - Strict multi-tenant anti-IDOR protection on all dashboard, stats, history, and deletion endpoints (HTTP 404 with zero leakage)
+  - 209 total automated backend unit, integration, and security tests passing with zero failures
+  - Production frontend build verified with zero errors (1612 modules compiled)
+
+- **Phase 10: GitHub & VCS Repository Integration** — Planned Next

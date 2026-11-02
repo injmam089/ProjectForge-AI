@@ -54,4 +54,10 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
      * Counts documents for a project.
      */
     long countByProjectId(Long projectId);
+
+    /**
+     * Batch counts documents grouped by project ID for a list of project IDs.
+     */
+    @Query("SELECT d.project.id, COUNT(d) FROM Document d WHERE d.project.id IN :projectIds GROUP BY d.project.id")
+    List<Object[]> countByProjectIds(@Param("projectIds") List<Long> projectIds);
 }

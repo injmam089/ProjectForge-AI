@@ -51,6 +51,7 @@ public class DocumentWorkspaceService {
     private final MarkdownGenerator markdownGenerator;
     private final DocumentContentValidator documentContentValidator;
     private final ObjectMapper objectMapper;
+    private final ProjectHistoryService projectHistoryService;
 
     public DocumentWorkspaceService(
             DocumentRepository documentRepository,
@@ -61,6 +62,21 @@ public class DocumentWorkspaceService {
             DocumentContentValidator documentContentValidator,
             ObjectMapper objectMapper
     ) {
+        this(documentRepository, documentVersionRepository, projectRepository, userRepository,
+                markdownGenerator, documentContentValidator, objectMapper, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DocumentWorkspaceService(
+            DocumentRepository documentRepository,
+            DocumentVersionRepository documentVersionRepository,
+            ProjectRepository projectRepository,
+            UserRepository userRepository,
+            MarkdownGenerator markdownGenerator,
+            DocumentContentValidator documentContentValidator,
+            ObjectMapper objectMapper,
+            ProjectHistoryService projectHistoryService
+    ) {
         this.documentRepository = documentRepository;
         this.documentVersionRepository = documentVersionRepository;
         this.projectRepository = projectRepository;
@@ -68,6 +84,7 @@ public class DocumentWorkspaceService {
         this.markdownGenerator = markdownGenerator;
         this.documentContentValidator = documentContentValidator;
         this.objectMapper = objectMapper;
+        this.projectHistoryService = projectHistoryService;
     }
 
     /**
@@ -132,6 +149,20 @@ public class DocumentWorkspaceService {
 
         // 5. Invariant check: Specification must be 100% immutable
         assertSpecificationUntouched(document.getProject(), initialSpec);
+
+        if (projectHistoryService != null) {
+            try {
+                projectHistoryService.recordEvent(
+                        savedDoc.getProject(),
+                        com.projectforge.entity.ProjectHistoryEventType.DOCUMENT_EDITED,
+                        String.format("Document '%s' updated to version %d", savedDoc.getFilename(), savedDoc.getVersion()),
+                        null,
+                        user.getEmail()
+                );
+            } catch (Exception e) {
+                log.warn("Failed to record history event for document save: {}", e.getMessage());
+            }
+        }
 
         log.info("Document id: {} ('{}') manually updated to version {} by user: {}",
                 savedDoc.getId(), savedDoc.getFilename(), savedDoc.getVersion(), user.getId());
@@ -215,6 +246,20 @@ public class DocumentWorkspaceService {
 
         assertSpecificationUntouched(document.getProject(), initialSpec);
 
+        if (projectHistoryService != null) {
+            try {
+                projectHistoryService.recordEvent(
+                        savedDoc.getProject(),
+                        com.projectforge.entity.ProjectHistoryEventType.DOCUMENT_RESTORED,
+                        String.format("Document '%s' restored from version %d to version %d", savedDoc.getFilename(), targetVersion, savedDoc.getVersion()),
+                        null,
+                        user.getEmail()
+                );
+            } catch (Exception e) {
+                log.warn("Failed to record history event for document restore: {}", e.getMessage());
+            }
+        }
+
         log.info("Document id: {} ('{}') restored from version {} to new version {} by user: {}",
                 savedDoc.getId(), savedDoc.getFilename(), targetVersion, savedDoc.getVersion(), user.getId());
 
@@ -268,6 +313,20 @@ public class DocumentWorkspaceService {
             Document savedDoc = documentRepository.save(document);
 
             assertSpecificationUntouched(project, initialSpec);
+
+            if (projectHistoryService != null) {
+                try {
+                    projectHistoryService.recordEvent(
+                            project,
+                            com.projectforge.entity.ProjectHistoryEventType.DOCUMENT_REGENERATED,
+                            String.format("Document '%s' regenerated to version %d", savedDoc.getFilename(), savedDoc.getVersion()),
+                            null,
+                            user.getEmail()
+                    );
+                } catch (Exception e) {
+                    log.warn("Failed to record history event for document regenerate: {}", e.getMessage());
+                }
+            }
 
             log.info("Document id: {} ('{}') regenerated from specification to version {} by user: {}",
                     savedDoc.getId(), savedDoc.getFilename(), savedDoc.getVersion(), user.getId());

@@ -30,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Example;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.repository.query.FluentQuery;
@@ -572,6 +573,26 @@ class ProjectRequirementsServiceTest {
         @Override
         public long countByUserIdAndStatus(Long userId, ProjectStatus status) {
             return projects.values().stream().filter(p -> p.getUser().getId().equals(userId) && p.getStatus() == status).count();
+        }
+
+        @Override
+        public Page<Project> findWithFilters(Long userId, ProjectStatus status, com.projectforge.entity.ProjectType type, com.projectforge.entity.ProjectDifficulty difficulty, String search, Pageable pageable) {
+            List<Project> filtered = findWithFilters(userId, status, type, difficulty, search, pageable.getSort());
+            int start = (int) pageable.getOffset();
+            int end = Math.min((start + pageable.getPageSize()), filtered.size());
+            List<Project> sub = start > filtered.size() ? List.of() : filtered.subList(start, end);
+            return new PageImpl<>(sub, pageable, filtered.size());
+        }
+
+        @Override
+        public List<Project> findWithFilters(Long userId, ProjectStatus status, com.projectforge.entity.ProjectType type, com.projectforge.entity.ProjectDifficulty difficulty, String search, Sort sort) {
+            return projects.values().stream()
+                    .filter(p -> p.getUser().getId().equals(userId))
+                    .filter(p -> status == null || p.getStatus() == status)
+                    .filter(p -> type == null || p.getProjectType() == type)
+                    .filter(p -> difficulty == null || p.getDifficulty() == difficulty)
+                    .filter(p -> search == null || search.isBlank() || p.getName().toLowerCase().contains(search.toLowerCase()) || (p.getDescription() != null && p.getDescription().toLowerCase().contains(search.toLowerCase())))
+                    .toList();
         }
 
         @Override

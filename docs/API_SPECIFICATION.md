@@ -83,11 +83,95 @@ All project endpoints require `Authorization: Bearer <token>`.
   ```
 - **Response**: Full `ProjectResponse` DTO with `status = "DRAFT"`.
 
-### List User's Projects
+### List User's Projects (Search, Filter, Sort, Pagination - Phase 9 Enhanced)
 - **Method**: `GET`
 - **Path**: `/api/projects`
-- **Status**: `200 OK`
-- **Response**: List of `ProjectSummaryResponse` objects owned by the authenticated user, ordered by `updatedAt` descending.
+- **Access**: Authenticated (`Authorization: Bearer <token>`)
+- **Query Parameters (Optional)**:
+  - `page`: Zero-based page index (e.g. `0`). When omitted, returns backward-compatible unpaginated `List<ProjectSummaryResponse>`.
+  - `size`: Page size limit (default `12`, clamped to `1..100`).
+  - `search`: Case-insensitive substring query on `name` or `description` (clamped to <=100 characters).
+  - `status`: Filter by lifecycle status (`DRAFT`, `READY_FOR_ANALYSIS`, `ANALYZING`, `UNDER_REVIEW`, `REQUIREMENTS_READY`, `APPROVED`, `GENERATED`, `EXPORTED`).
+  - `type`: Filter by project type (`WEB_APPLICATION`, `MOBILE_APP`, `CLI_TOOL`, `API_SERVICE`, `DATA_PIPELINE`, `DESKTOP_APP`, `OTHER`).
+  - `difficulty`: Filter by difficulty level (`BEGINNER`, `INTERMEDIATE`, `ADVANCED`, `EXPERT`).
+  - `sort`: Field name to sort by (strictly validated allowlist: `updatedAt`, `createdAt`, `name`, `status`; default `updatedAt`).
+  - `direction`: Sort direction (`ASC` or `DESC`; default `DESC`).
+- **Responses**:
+  - `200 OK` (when `page` parameter is supplied):
+    ```json
+    {
+      "content": [
+        {
+          "id": 1,
+          "name": "CloudPulse Monitoring",
+          "description": "Distributed observability platform",
+          "projectType": "WEB_APPLICATION",
+          "status": "GENERATED",
+          "difficulty": "ADVANCED",
+          "createdAt": "2026-11-01T12:00:00Z",
+          "updatedAt": "2026-11-01T12:30:00Z",
+          "documentCount": 8,
+          "qualityScore": 95
+        }
+      ],
+      "page": 0,
+      "size": 12,
+      "totalElements": 1,
+      "totalPages": 1,
+      "first": true,
+      "last": true
+    }
+    ```
+  - `200 OK` (when `page` is omitted, backward-compatible): Returns array `[ { ...ProjectSummaryResponse } ]`.
+
+### Get User Project Statistics (Phase 9)
+- **Method**: `GET`
+- **Path**: `/api/projects/stats`
+- **Access**: Authenticated (`Authorization: Bearer <token>`)
+- **Description**: Returns aggregated metrics strictly scoped to the authenticated user's workspace.
+- **Response**:
+  ```json
+  {
+    "totalProjects": 12,
+    "draftProjects": 3,
+    "underReviewProjects": 2,
+    "approvedProjects": 1,
+    "generatedProjects": 4,
+    "exportedProjects": 2
+  }
+  ```
+
+### Get Project Activity & History (Phase 9)
+- **Method**: `GET`
+- **Path**: `/api/projects/{id}/history`
+- **Access**: Authenticated project owner.
+- **Query Parameters**:
+  - `page`: Zero-based page index (default `0`).
+  - `size`: Page size limit (default `20`, clamped to `1..100`).
+- **Responses**:
+  - `200 OK`: Paginated list of lifecycle audit events ordered newest first (`createdAt DESC, id DESC`).
+    ```json
+    {
+      "content": [
+        {
+          "id": 42,
+          "projectId": 1,
+          "eventType": "PROJECT_EXPORTED",
+          "description": "Project documentation exported as ZIP package",
+          "metadata": "{\"fileCount\": 8, \"packageSizeBytes\": 48210}",
+          "createdBy": "alpha@test.com",
+          "createdAt": "2026-11-02T10:15:30Z"
+        }
+      ],
+      "page": 0,
+      "size": 20,
+      "totalElements": 1,
+      "totalPages": 1,
+      "first": true,
+      "last": true
+    }
+    ```
+  - `404 Not Found`: Project does not exist OR belongs to another user (anti-IDOR).
 
 ### Get Project Details
 - **Method**: `GET`
@@ -520,8 +604,8 @@ All review and approval endpoints require `Authorization: Bearer <token>`.
 
 ---
 
-## 5. Planned Future Endpoints (Phase 9+)
+## 5. Planned Future Endpoints (Phase 10+)
 
 ### Future Integrations
-- Dashboard Analytics & Export History (Phase 9)
-- VCS Integration (Phase 10+)
+- GitHub & VCS Repository Creation (Phase 10)
+- End-to-End Orchestration & Polish (Phase 11)

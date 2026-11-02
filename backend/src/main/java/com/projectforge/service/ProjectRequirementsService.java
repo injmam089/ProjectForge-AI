@@ -50,8 +50,8 @@ public class ProjectRequirementsService {
     private final RequirementValidator requirementValidator;
     private final QualityEvaluator qualityEvaluator;
     private final ObjectMapper objectMapper;
+    private final ProjectHistoryService projectHistoryService;
 
-    @Autowired
     public ProjectRequirementsService(
             ProjectRepository projectRepository,
             UserRepository userRepository,
@@ -61,6 +61,21 @@ public class ProjectRequirementsService {
             QualityEvaluator qualityEvaluator,
             ObjectMapper objectMapper
     ) {
+        this(projectRepository, userRepository, requirementAnalyzer, clarificationEngine,
+                requirementValidator, qualityEvaluator, objectMapper, null);
+    }
+
+    @Autowired
+    public ProjectRequirementsService(
+            ProjectRepository projectRepository,
+            UserRepository userRepository,
+            RequirementAnalyzer requirementAnalyzer,
+            ClarificationEngine clarificationEngine,
+            RequirementValidator requirementValidator,
+            QualityEvaluator qualityEvaluator,
+            ObjectMapper objectMapper,
+            ProjectHistoryService projectHistoryService
+    ) {
         this.projectRepository = projectRepository;
         this.userRepository = userRepository;
         this.requirementAnalyzer = requirementAnalyzer;
@@ -68,6 +83,7 @@ public class ProjectRequirementsService {
         this.requirementValidator = requirementValidator;
         this.qualityEvaluator = qualityEvaluator;
         this.objectMapper = objectMapper;
+        this.projectHistoryService = projectHistoryService;
     }
 
     public ProjectRequirementsService(
@@ -78,7 +94,7 @@ public class ProjectRequirementsService {
             ObjectMapper objectMapper
     ) {
         this(projectRepository, userRepository, requirementAnalyzer, clarificationEngine,
-                new RequirementValidator(), new QualityEvaluator(), objectMapper);
+                new RequirementValidator(), new QualityEvaluator(), objectMapper, null);
     }
 
     /**
@@ -120,6 +136,20 @@ public class ProjectRequirementsService {
             ProjectStatus nextStatus = determineRequirementsStatus(result.openQuestions());
             project.setStatus(nextStatus);
             Project savedProject = projectRepository.save(project);
+
+            if (projectHistoryService != null) {
+                try {
+                    projectHistoryService.recordEvent(
+                            savedProject,
+                            com.projectforge.entity.ProjectHistoryEventType.REQUIREMENTS_READY,
+                            String.format("AI requirements analysis completed (quality score: %d/100)", result.qualityScore()),
+                            null,
+                            user.getEmail()
+                    );
+                } catch (Exception e) {
+                    log.warn("Failed to record history event for requirements analysis: {}", e.getMessage());
+                }
+            }
 
             String message = (nextStatus == ProjectStatus.UNDER_REVIEW)
                     ? "AI requirements analysis completed. Unresolved critical/high decisions require clarification before requirements are ready."
@@ -219,6 +249,20 @@ public class ProjectRequirementsService {
             ProjectStatus nextStatus = determineRequirementsStatus(result.openQuestions());
             project.setStatus(nextStatus);
             Project savedProject = projectRepository.save(project);
+
+            if (projectHistoryService != null) {
+                try {
+                    projectHistoryService.recordEvent(
+                            savedProject,
+                            com.projectforge.entity.ProjectHistoryEventType.REQUIREMENTS_READY,
+                            String.format("AI requirements analysis completed (quality score: %d/100)", result.qualityScore()),
+                            null,
+                            user.getEmail()
+                    );
+                } catch (Exception e) {
+                    log.warn("Failed to record history event for requirements analysis: {}", e.getMessage());
+                }
+            }
 
             String message = (nextStatus == ProjectStatus.UNDER_REVIEW)
                     ? "Clarifications incorporated, but additional critical/high decisions require clarification before requirements are ready."
@@ -363,6 +407,21 @@ public class ProjectRequirementsService {
         }
 
         Project savedProject = projectRepository.save(project);
+
+        if (projectHistoryService != null) {
+            try {
+                projectHistoryService.recordEvent(
+                        savedProject,
+                        com.projectforge.entity.ProjectHistoryEventType.REVIEW_UPDATED,
+                        "Project specification updated during human review",
+                        null,
+                        user.getEmail()
+                );
+            } catch (Exception e) {
+                log.warn("Failed to record history event for review update: {}", e.getMessage());
+            }
+        }
+
         log.info("Project id: {} updated via review in status: {} with quality score: {}",
                 savedProject.getId(), nextStatus, qualityDto.overallScore());
 
@@ -466,6 +525,20 @@ public class ProjectRequirementsService {
         project.setStatus(ProjectStatus.APPROVED);
         Project savedProject = projectRepository.save(project);
         int qualityScore = specNode.path("qualityScore").asInt(80);
+
+        if (projectHistoryService != null) {
+            try {
+                projectHistoryService.recordEvent(
+                        savedProject,
+                        com.projectforge.entity.ProjectHistoryEventType.PROJECT_APPROVED,
+                        String.format("Project requirements approved (quality score: %d/100)", qualityScore),
+                        null,
+                        user.getEmail()
+                );
+            } catch (Exception e) {
+                log.warn("Failed to record history event for project approval: {}", e.getMessage());
+            }
+        }
 
         log.info("Project id: {} explicitly approved by user: {}", savedProject.getId(), user.getId());
 

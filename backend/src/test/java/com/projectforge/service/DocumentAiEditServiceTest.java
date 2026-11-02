@@ -316,6 +316,14 @@ class DocumentAiEditServiceTest {
         @Override public long countByProjectId(Long projectId) {
             return documents.values().stream().filter(d -> d.getProject().getId().equals(projectId)).count();
         }
+        @Override public List<Object[]> countByProjectIds(List<Long> projectIds) {
+            Map<Long, Long> counts = documents.values().stream()
+                    .filter(d -> projectIds.contains(d.getProject().getId()))
+                    .collect(java.util.stream.Collectors.groupingBy(d -> d.getProject().getId(), java.util.stream.Collectors.counting()));
+            return counts.entrySet().stream()
+                    .map(e -> new Object[]{ e.getKey(), e.getValue() })
+                    .toList();
+        }
         @Override public <S extends Document> S save(S entity) {
             documents.put(entity.getId(), entity);
             return entity;

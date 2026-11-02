@@ -50,6 +50,7 @@ public class DocumentAiEditService {
     private final AIService aiService;
     private final DocumentContentValidator documentContentValidator;
     private final ObjectMapper objectMapper;
+    private final ProjectHistoryService projectHistoryService;
 
     public DocumentAiEditService(
             DocumentRepository documentRepository,
@@ -59,12 +60,27 @@ public class DocumentAiEditService {
             DocumentContentValidator documentContentValidator,
             ObjectMapper objectMapper
     ) {
+        this(documentRepository, documentVersionRepository, userRepository, aiService,
+                documentContentValidator, objectMapper, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DocumentAiEditService(
+            DocumentRepository documentRepository,
+            DocumentVersionRepository documentVersionRepository,
+            UserRepository userRepository,
+            AIService aiService,
+            DocumentContentValidator documentContentValidator,
+            ObjectMapper objectMapper,
+            ProjectHistoryService projectHistoryService
+    ) {
         this.documentRepository = documentRepository;
         this.documentVersionRepository = documentVersionRepository;
         this.userRepository = userRepository;
         this.aiService = aiService;
         this.documentContentValidator = documentContentValidator;
         this.objectMapper = objectMapper;
+        this.projectHistoryService = projectHistoryService;
     }
 
     /**
@@ -147,6 +163,20 @@ public class DocumentAiEditService {
 
         // 8. Invariant: Specification was never modified
         assertSpecificationUntouched(project, initialSpec);
+
+        if (projectHistoryService != null) {
+            try {
+                projectHistoryService.recordEvent(
+                        project,
+                        com.projectforge.entity.ProjectHistoryEventType.DOCUMENT_AI_EDITED,
+                        String.format("AI edit '%s' applied to '%s' (version %d)", request.action(), savedDoc.getFilename(), savedDoc.getVersion()),
+                        null,
+                        user.getEmail()
+                );
+            } catch (Exception e) {
+                log.warn("Failed to record history event for AI edit: {}", e.getMessage());
+            }
+        }
 
         log.info("Document id: {} ('{}') successfully AI-edited to version {} with action {}",
                 savedDoc.getId(), savedDoc.getFilename(), savedDoc.getVersion(), request.action());

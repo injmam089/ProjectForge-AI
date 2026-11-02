@@ -5,23 +5,30 @@ import com.projectforge.dto.ApprovalResponse;
 import com.projectforge.dto.ClarificationRequest;
 import com.projectforge.dto.DocumentGenerationResponse;
 import com.projectforge.dto.DocumentSummaryResponse;
+import com.projectforge.dto.ExportResponse;
+import com.projectforge.dto.PagedResponse;
 import com.projectforge.dto.ProjectCreateRequest;
+import com.projectforge.dto.ProjectHistoryResponse;
 import com.projectforge.dto.ProjectResponse;
 import com.projectforge.dto.ProjectReviewResponse;
 import com.projectforge.dto.ProjectReviewUpdateRequest;
 import com.projectforge.dto.ProjectSpecificationResponse;
 import com.projectforge.dto.ProjectSpecificationUpdateRequest;
+import com.projectforge.dto.ProjectStatsResponse;
 import com.projectforge.dto.ProjectSummaryResponse;
 import com.projectforge.dto.ProjectUpdateRequest;
 import com.projectforge.dto.RequirementsAnalysisResponse;
 import com.projectforge.dto.WorkspaceResponse;
+import com.projectforge.entity.ProjectDifficulty;
+import com.projectforge.entity.ProjectStatus;
+import com.projectforge.entity.ProjectType;
+import com.projectforge.export.ExportService;
 import com.projectforge.service.DocumentGenerationService;
 import com.projectforge.service.DocumentWorkspaceService;
+import com.projectforge.service.ProjectHistoryService;
 import com.projectforge.service.ProjectRequirementsService;
 import com.projectforge.service.ProjectService;
 import jakarta.validation.Valid;
-import com.projectforge.dto.ExportResponse;
-import com.projectforge.export.ExportService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -34,13 +41,14 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
 /**
  * Controller exposing authenticated project management, requirements intake,
- * and AI requirement analysis endpoints.
+ * AI requirement analysis, dashboard statistics, search/filtering, and project history.
  * All routes require authentication and strictly enforce user ownership.
  */
 @RestController
@@ -52,13 +60,14 @@ public class ProjectController {
     private final DocumentGenerationService documentGenerationService;
     private final DocumentWorkspaceService documentWorkspaceService;
     private final ExportService exportService;
+    private final ProjectHistoryService projectHistoryService;
 
     public ProjectController(ProjectService projectService) {
-        this(projectService, null, null, null, null);
+        this(projectService, null, null, null, null, null);
     }
 
     public ProjectController(ProjectService projectService, ProjectRequirementsService projectRequirementsService) {
-        this(projectService, projectRequirementsService, null, null, null);
+        this(projectService, projectRequirementsService, null, null, null, null);
     }
 
     public ProjectController(
@@ -66,7 +75,7 @@ public class ProjectController {
             ProjectRequirementsService projectRequirementsService,
             DocumentGenerationService documentGenerationService
     ) {
-        this(projectService, projectRequirementsService, documentGenerationService, null, null);
+        this(projectService, projectRequirementsService, documentGenerationService, null, null, null);
     }
 
     public ProjectController(
@@ -75,7 +84,17 @@ public class ProjectController {
             DocumentGenerationService documentGenerationService,
             DocumentWorkspaceService documentWorkspaceService
     ) {
-        this(projectService, projectRequirementsService, documentGenerationService, documentWorkspaceService, null);
+        this(projectService, projectRequirementsService, documentGenerationService, documentWorkspaceService, null, null);
+    }
+
+    public ProjectController(
+            ProjectService projectService,
+            ProjectRequirementsService projectRequirementsService,
+            DocumentGenerationService documentGenerationService,
+            DocumentWorkspaceService documentWorkspaceService,
+            ExportService exportService
+    ) {
+        this(projectService, projectRequirementsService, documentGenerationService, documentWorkspaceService, exportService, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -84,13 +103,15 @@ public class ProjectController {
             ProjectRequirementsService projectRequirementsService,
             DocumentGenerationService documentGenerationService,
             DocumentWorkspaceService documentWorkspaceService,
-            ExportService exportService
+            ExportService exportService,
+            ProjectHistoryService projectHistoryService
     ) {
         this.projectService = projectService;
         this.projectRequirementsService = projectRequirementsService;
         this.documentGenerationService = documentGenerationService;
         this.documentWorkspaceService = documentWorkspaceService;
         this.exportService = exportService;
+        this.projectHistoryService = projectHistoryService;
     }
 
     /**
@@ -106,14 +127,40 @@ public class ProjectController {
     }
 
     /**
-     * Lists all projects owned by the authenticated user.
+     * Lists all projects owned by the authenticated user, or searches/filters/paginates if parameters provided.
      */
     @GetMapping
-    public ResponseEntity<List<ProjectSummaryResponse>> getMyProjects(
+    public ResponseEntity<?> getMyProjects(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) ProjectStatus status,
+            @RequestParam(required = false) ProjectType type,
+            @RequestParam(required = false) ProjectDifficulty difficulty,
+            @RequestParam(required = false, defaultValue = "updatedAt") String sort,
+            @RequestParam(required = false, defaultValue = "desc") String direction,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
-        List<ProjectSummaryResponse> projects = projectService.getUserProjects(userDetails.getUsername());
-        return ResponseEntity.ok(projects);
+        if (page == null && search == null && status == null && type == null && difficulty == null &&
+            (sort == null || sort.equals("updatedAt")) && (direction == null || direction.equals("desc"))) {
+            List<ProjectSummaryResponse> projects = projectService.getUserProjects(userDetails.getUsername());
+            return ResponseEntity.ok(projects);
+        }
+        Object result = projectService.searchAndFilterProjects(
+                userDetails.getUsername(), search, status, type, difficulty, sort, direction, page, size
+        );
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Retrieves summary dashboard metrics for all projects owned by the authenticated user.
+     */
+    @GetMapping("/stats")
+    public ResponseEntity<ProjectStatsResponse> getProjectStats(
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        ProjectStatsResponse stats = projectService.getProjectStats(userDetails.getUsername());
+        return ResponseEntity.ok(stats);
     }
 
     /**
@@ -126,6 +173,25 @@ public class ProjectController {
     ) {
         ProjectResponse response = projectService.getProjectById(id, userDetails.getUsername());
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Retrieves paginated lifecycle history events for an owned project ordered newest first.
+     */
+    @GetMapping("/{id}/history")
+    public ResponseEntity<PagedResponse<ProjectHistoryResponse>> getProjectHistory(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        if (projectHistoryService == null) {
+            return ResponseEntity.ok(new PagedResponse<>(List.of(), 0, size, 0, 0, true, true));
+        }
+        PagedResponse<ProjectHistoryResponse> history = projectHistoryService.getProjectHistory(
+                id, userDetails.getUsername(), page, size
+        );
+        return ResponseEntity.ok(history);
     }
 
     /**
@@ -203,7 +269,7 @@ public class ProjectController {
     }
 
     /**
-     * Retrieves the current structured requirements and open questions for an owned project.
+     * Retrieves structured requirements analysis for an owned project.
      */
     @GetMapping("/{id}/requirements")
     public ResponseEntity<RequirementsAnalysisResponse> getRequirements(
@@ -215,7 +281,7 @@ public class ProjectController {
     }
 
     /**
-     * Submits user clarification answers to refine the structured requirements.
+     * Submits clarification answers to open questions on an owned project.
      */
     @PostMapping("/{id}/clarifications")
     public ResponseEntity<RequirementsAnalysisResponse> submitClarifications(
@@ -228,7 +294,7 @@ public class ProjectController {
     }
 
     /**
-     * Retrieves the human-in-the-loop review summary for an owned project.
+     * Retrieves human review data including specification, quality score, and blocking questions.
      */
     @GetMapping("/{id}/review")
     public ResponseEntity<ProjectReviewResponse> getReview(
@@ -240,7 +306,7 @@ public class ProjectController {
     }
 
     /**
-     * Updates and validates the reviewed specification for an owned project during human review.
+     * Updates specification during human-in-the-loop review.
      */
     @PutMapping("/{id}/review")
     public ResponseEntity<ProjectReviewResponse> updateReview(
@@ -253,15 +319,16 @@ public class ProjectController {
     }
 
     /**
-     * Explicitly approves the structured project requirements as the single source of truth.
+     * Explicitly approves project requirements, locking specification as single source of truth.
      */
     @PostMapping("/{id}/approve")
     public ResponseEntity<ApprovalResponse> approveProject(
             @PathVariable Long id,
-            @Valid @RequestBody ApprovalRequest request,
+            @Valid @RequestBody(required = false) ApprovalRequest request,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
-        ApprovalResponse response = projectRequirementsService.approveProject(id, request, userDetails.getUsername());
+        ApprovalRequest safeRequest = request != null ? request : new ApprovalRequest(true);
+        ApprovalResponse response = projectRequirementsService.approveProject(id, safeRequest, userDetails.getUsername());
         return ResponseEntity.ok(response);
     }
 
@@ -302,7 +369,7 @@ public class ProjectController {
     }
 
     /**
-     * Prepares export metadata for an owned project.
+     * Prepares ZIP export package metadata for an owned project.
      */
     @PostMapping("/{id}/export")
     public ResponseEntity<ExportResponse> prepareExport(
@@ -314,7 +381,7 @@ public class ProjectController {
     }
 
     /**
-     * Downloads finalized project Markdown documentation as a secure ZIP package.
+     * Generates and downloads the binary ZIP package containing current active Markdown documentation.
      */
     @GetMapping("/{id}/export/download")
     public ResponseEntity<byte[]> downloadExport(

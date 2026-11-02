@@ -186,3 +186,40 @@ ProjectForge_<safe-project-name>/
 - **Zero Database State Mutations**: Export generation is strictly non-mutating. No records in `projects`, `documents`, or `document_versions` are modified or created. No export history tables or disk files are stored.
 - **Zero External AI Calls**: Packaging operates entirely on in-memory and database-persisted documents via standard JDK `java.util.zip` streams without external API network latency or failure modes.
 - **Current Active State**: Documents exported represent the active content of each document at the time of export (`doc.getContent()`, `doc.getVersion()`), reflecting all manual and AI edits saved by the user.
+
+---
+
+## 7. Dashboard & Project History Architecture (Phase 9)
+
+### 7.1 Authoritative Read-Only Dashboard & Aggregation Layer
+The Phase 9 Dashboard functions strictly as a view, search, and navigation layer over authoritative backend domain models (`Project`, `Project Specification`, `Document`, `DocumentVersion`).
+- **Zero Schema Duplication**: No shadow entities or cached counters exist. Document counts and quality scores are queried directly from authoritative relational stores (`DocumentRepository.countByProjectIds`, `Project.qualityScore`).
+- **User-Scoped Aggregations (`/api/projects/stats`)**: Computes exact lifecycle state counts (`totalProjects`, `draftProjects`, `underReviewProjects`, `approvedProjects`, `generatedProjects`, `exportedProjects`) filtered strictly to the caller's authenticated user ID.
+
+### 7.2 Project History Audit Subsystem (`ProjectHistory`)
+Every significant project milestone and workspace mutation records a transactional audit record in the `project_history` table:
+
+```text
+Project Created ──► PROJECT_CREATED
+Analysis Triggered ──► ANALYSIS_STARTED
+Questions Answered ──► REQUIREMENTS_READY / UNDER_REVIEW
+Review Edited ──► REVIEW_UPDATED
+Project Approved ──► PROJECT_APPROVED
+Docs Generated ──► DOCUMENTS_GENERATED
+Workspace Edits ──► DOCUMENT_EDITED / DOCUMENT_AI_EDITED / DOCUMENT_RESTORED / DOCUMENT_REGENERATED
+ZIP Exported ──► PROJECT_EXPORTED
+```
+
+#### Entity Schema (`project_history`):
+- `id` (BIGINT, PRIMARY KEY, AUTO_INCREMENT)
+- `project_id` (BIGINT, FK -> `projects.id`, ON DELETE CASCADE, INDEXED)
+- `event_type` (VARCHAR(50), NOT NULL, Controlled Enum `ProjectHistoryEventType`)
+- `description` (VARCHAR(500), NOT NULL)
+- `metadata` (VARCHAR(4000), Sanitized JSON or null)
+- `created_by` (VARCHAR(100), NOT NULL, User Email or "system")
+- `created_at` (TIMESTAMP WITH TIME ZONE, NOT NULL, INDEXED)
+- **Composite Index**: `(project_id, created_at)` for high-performance reverse-chronological retrieval.
+
+### 7.3 Multi-Tenant Isolation & Clean Cascade Deletion
+- **Query Scoping**: Every search, filter, sort, pagination, stats, and history query includes `WHERE p.user.id = :userId`. Cross-tenant lookups strictly return `404 Not Found`.
+- **Safe Cascade Deletion**: Deleting a project systematically deletes `DocumentVersion`, `Document`, `ProjectHistory`, and the `Project` entity within a single atomic `@Transactional` boundary, guaranteed by both JPA repositories and database constraints.

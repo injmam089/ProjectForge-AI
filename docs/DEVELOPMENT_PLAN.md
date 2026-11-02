@@ -8,7 +8,7 @@
 6. Markdown generation: document planner and canonical generators. [COMPLETED & VERIFIED]
 7. Markdown workspace: preview, editor, save, AI edit, monotonic versioning, restore, and regeneration. [COMPLETED & VERIFIED]
 8. ZIP export: document selection, safe archive, manifest generation, download, anti-IDOR. [COMPLETED & VERIFIED]
-9. Dashboard and project history. [PENDING]
+9. Dashboard and project history: user workspace, stats aggregations, search, filter, sort, pagination, audit activity history, cascade deletion. [COMPLETED & VERIFIED]
 10. Testing and security hardening. [PENDING]
 11. Deployment. [PENDING]
 12. UX, accessibility, performance, polish. [PENDING]
