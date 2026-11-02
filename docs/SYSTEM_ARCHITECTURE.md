@@ -119,3 +119,70 @@ APPROVED PROJECT SPECIFICATION (Immutable JSON Source of Truth)
 - Action-Oriented Prompts: Supports `IMPROVE`, `EXPAND`, `SIMPLIFY`, and `CUSTOM` directives.
 - Validation Pipeline: Output is trimmed of superfluous wrapper fences and verified against length and safety rules before persistence.
 - Complete Auditability: AI edits record the applied action, user instruction, and timestamp in the version snapshot.
+
+## 6. ZIP Export & Project Package Generation Architecture (Phase 8)
+
+### 6.1 Package Assembly Pipeline
+
+```text
+Approved Project Specification (Source of Truth)
+            ↓
+Current Active Markdown Documents (documents table)
+            ↓
+ExportValidator (Ownership, Count, Size, Filename, Path Traversal)
+            ↓
+ExportManifestBuilder (EXPORT_MANIFEST.json generation)
+            ↓
+ZipPackageBuilder (In-memory ZipOutputStream assembly)
+            ↓
+Post-Generation Integrity Check (ZipInputStream verification)
+            ↓
+Binary Stream -> Browser Download (Content-Type: application/zip)
+```
+
+### 6.2 Archive Directory Structure
+
+```text
+ProjectForge_<safe-project-name>/
+├── README.md
+├── ARCHITECTURE.md
+├── SYSTEM_PATTERNS.md
+├── TECH_STACK.md
+├── COMPONENT_SPECS.md
+├── DATABASE_DESIGN.md
+├── API_SPECIFICATION.md
+├── SECURITY_GUIDELINES.md
+├── DEVELOPMENT_PLAN.md
+├── TESTING_STRATEGY.md
+├── DEPLOYMENT_GUIDE.md
+├── AI_INSTRUCTIONS.md
+├── PROMPT_TEMPLATES.md
+├── TASK_BREAKDOWN.md
+└── projectforge/
+    └── EXPORT_MANIFEST.json
+```
+
+### 6.3 Export Manifest Format (`EXPORT_MANIFEST.json`)
+
+```json
+{
+  "product": "ProjectForge AI",
+  "projectName": "CloudPulse Telemetry",
+  "projectId": 1,
+  "exportVersion": "1.0",
+  "generatedAt": "2026-11-02T12:00:00Z",
+  "documentCount": 14,
+  "documents": [
+    {
+      "filename": "README.md",
+      "version": 2
+    }
+  ]
+}
+```
+
+### 6.4 Read-Only Guarantees & Zero AI Dependency
+
+- **Zero Database State Mutations**: Export generation is strictly non-mutating. No records in `projects`, `documents`, or `document_versions` are modified or created. No export history tables or disk files are stored.
+- **Zero External AI Calls**: Packaging operates entirely on in-memory and database-persisted documents via standard JDK `java.util.zip` streams without external API network latency or failure modes.
+- **Current Active State**: Documents exported represent the active content of each document at the time of export (`doc.getContent()`, `doc.getVersion()`), reflecting all manual and AI edits saved by the user.

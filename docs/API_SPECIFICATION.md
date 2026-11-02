@@ -452,6 +452,53 @@ All review and approval endpoints require `Authorization: Bearer <token>`.
 
 ---
 
+## 3.8 ZIP Export & Package Generation (Phase 8)
+
+### Prepare / Validate Export Package
+- **Method**: `POST`
+- **Path**: `/api/projects/{id}/export`
+- **Description**: Validates export prerequisites (anti-IDOR project ownership, active documents existence, size and count limits, path traversal safety) and generates the package metadata including sanitized filename and document count.
+- **Access**: Authenticated project owner (`ROLE_USER`, `ROLE_ADMIN`).
+- **Responses**:
+  - `200 OK`: `ExportResponse`
+    ```json
+    {
+      "projectId": 1,
+      "projectName": "CloudPulse Telemetry",
+      "documentCount": 14,
+      "filename": "ProjectForge_CloudPulse_Telemetry.zip",
+      "exportedAt": "2026-11-02T12:00:00Z"
+    }
+    ```
+  - `400 Bad Request`: Validation failure (project has 0 documents generated, or exceeds size/count limits).
+  - `404 Not Found`: Project does not exist OR belongs to another user (anti-IDOR).
+
+### Download Export Archive
+- **Method**: `GET`
+- **Path**: `/api/projects/{id}/export/download`
+- **Description**: Streams the generated ZIP archive containing all current active Markdown documents and `projectforge/EXPORT_MANIFEST.json` under `ProjectForge_<safe-name>/`. Operates strictly read-only: project status, specifications, and documents remain 100% untouched.
+- **Access**: Authenticated project owner.
+- **Headers**:
+  - `Content-Type`: `application/zip`
+  - `Content-Disposition`: `attachment; filename="ProjectForge_<safe-name>.zip"`
+  - `Content-Length`: `<binary-byte-length>`
+- **Responses**:
+  - `200 OK`: Binary ZIP byte stream.
+  - `400 Bad Request`: Validation failure (empty project).
+  - `404 Not Found`: Project does not exist OR belongs to another user (anti-IDOR).
+
+### Export Download (Direct Alias)
+- **Method**: `GET`
+- **Path**: `/api/projects/{id}/export`
+- **Description**: Convenience alias for `GET /api/projects/{id}/export/download`. Streams the binary ZIP package.
+- **Access**: Authenticated project owner.
+- **Responses**:
+  - `200 OK`: Binary ZIP stream.
+  - `400 Bad Request`: Empty project.
+  - `404 Not Found`: Anti-IDOR not found.
+
+---
+
 ## 4. System & Health Endpoints
 
 ### System Health
@@ -473,8 +520,8 @@ All review and approval endpoints require `Authorization: Bearer <token>`.
 
 ---
 
-## 5. Planned Future Endpoints (Phase 8+)
+## 5. Planned Future Endpoints (Phase 9+)
 
-### Export Engine (Phase 8)
-- `POST /api/projects/{id}/export`
-- `GET /api/projects/{id}/export/download`
+### Future Integrations
+- Dashboard Analytics & Export History (Phase 9)
+- VCS Integration (Phase 10+)

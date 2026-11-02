@@ -24,3 +24,30 @@
 - **Prompt Injection Isolation**: Untrusted document content sent to OpenAI is strictly quarantined inside delimited `<untrusted-document-content>` fences. The LLM is explicitly instructed that content inside fences must be treated as passive data and never as execution instructions.
 - **Concurrency & Monotonic Versioning**: Version increments use pessimistic database row locking (`PESSIMISTIC_WRITE`) to prevent race conditions during rapid concurrent edits. Version numbers are strictly monotonic and never reset. Restores append new `RESTORE` snapshots, preserving complete tamper-evident audit history.
 - **Fail-Safe AI Isolation**: If the AI provider returns an error, times out, or outputs malformed text, the transaction rolls back cleanly without altering the document or its version history.
+
+## ZIP Export & Project Package Security (Phase 8)
+
+- **Anti-IDOR Enforcement**: All export endpoints (`POST /api/projects/{id}/export`, `GET /api/projects/{id}/export/download`, `GET /api/projects/{id}/export`) enforce strict tenant isolation. The project must be owned by the authenticated caller (`project.getUser().equals(currentUser)`). Unauthorized or cross-tenant requests return HTTP `404 Not Found` with zero metadata leakage to eliminate resource enumeration vectors.
+- **Path Traversal Defense (Zip Slip Prevention)**: 
+  - Every ZIP entry path is constructed strictly beneath a sanitized base folder: `ProjectForge_<safe-name>/`.
+  - Document filenames are strictly validated against `^[a-zA-Z0-9_-]+\.md$` with a maximum length of 100 characters.
+  - Path traversal sequences (`..`, `../`, `..\`), slashes, backslashes, colons, null bytes, and ASCII control characters are rejected immediately.
+  - Base directory and entry paths are normalized and checked to verify they remain strictly within the archive tree root.
+- **Archive Name Sanitization**:
+  - Raw project names are converted to safe ASCII tokens using `SafeArchiveName`: control characters, filesystem reserved characters (`<>:"/\\|?*`), and leading/trailing whitespace are stripped.
+  - Names are truncated to 50 characters, and sanitized identifiers default to `Project` if all characters are stripped.
+- **Resource Exhaustion & Zip Bomb Defenses**:
+  - `MAX_DOCUMENT_COUNT`: 100 documents maximum per project export.
+  - `MAX_SINGLE_DOCUMENT_SIZE`: 500,000 characters maximum per individual markdown file.
+  - `MAX_TOTAL_EXPORT_SIZE`: 10,000,000 bytes (10MB) maximum total uncompressed archive size.
+  - Empty projects (0 documents) are rejected with HTTP 400 Bad Request.
+  - Export generation is performed entirely in memory using standard JDK streaming buffers (`ByteArrayOutputStream`, `ZipOutputStream`) without temporary disk writes.
+- **Read-Only Immutability Guarantee**:
+  - Export generation is strictly read-only and side-effect free.
+  - It NEVER mutates `project.status`, `project.projectSpecification`, `document.content`, or `document_versions`.
+  - The service actively asserts that `project.getProjectSpecification()` remains bit-for-bit identical before and after export assembly.
+- **Secret & Credential Exclusion**:
+  - Export packages contain only current active project Markdown documentation and `projectforge/EXPORT_MANIFEST.json`.
+  - No environment files (`.env`, `application.properties`), API keys, user passwords, JWT tokens, database connection strings, or system logs are ever included.
+- **Post-Generation Archive Integrity Verification**:
+  - After in-memory ZIP package creation, the byte stream is validated with `ZipInputStream` to verify CRC32 integrity, assert entry count matches manifest metadata, and confirm manifest presence prior to sending the HTTP response.

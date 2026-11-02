@@ -214,5 +214,31 @@ http://localhost:5173
   - Modern React workspace featuring interactive analysis execution, quality score indicator, open question cards, and full specification tabbed views
   - 88 total automated backend unit, integration, and security tests passing with zero failures
 
-- **Phase 5: Requirements Workspace & Human-in-the-Loop Approval** — Planned Next
-"# ProjectForge-AI" 
+- **Phase 5: Requirements Workspace & Human-in-the-Loop Approval** — COMPLETED & VERIFIED
+  - Human-in-the-Loop review workflow with interactive question resolution
+  - Structured visual specification editor and raw JSON mode
+  - Explicit approval modal enforcing architectural readiness invariants
+  - Strict multi-tenant anti-IDOR protection on approval endpoints
+
+- **Phase 6: Markdown Documentation Generation** — COMPLETED & VERIFIED
+  - Canonical Java document generators deriving 14+ documentation files strictly from the approved JSON specification
+  - Deterministic document planning and cross-document consistency verification
+  - Document viewing modal and project-level generation pipeline
+
+- **Phase 7: Markdown Workspace & AI Document Editor** — COMPLETED & VERIFIED
+  - Markdown workspace with real-time editing and side-by-side CommonMark preview
+  - Strictly monotonic document versioning with append-only snapshots (`MANUAL_EDIT`, `AI_EDIT`, `REGENERATE`, `RESTORE`)
+  - AI-assisted document editing (`IMPROVE`, `EXPAND`, `SIMPLIFY`, `CUSTOM`) with prompt injection isolation fences
+  - Deterministic single-document regeneration and historical version restoration
+  - Specification immutability: Document editing never modifies the approved specification JSON
+
+- **Phase 8: ZIP Export & Project Package Generation** — COMPLETED & VERIFIED
+  - Export package preparation and validation endpoint (`POST /api/projects/{id}/export`)
+  - Streaming ZIP archive generation and download (`GET /api/projects/{id}/export/download`)
+  - In-memory package assembly with sanitized directory structure (`ProjectForge_<safe-name>/`)
+  - Standardized export manifest (`projectforge/EXPORT_MANIFEST.json`) excluding secrets and credentials
+  - Multi-tenant anti-IDOR protection, Zip Slip path traversal defenses, and resource limits
+  - Read-only immutability invariant: Export operations never mutate specifications or documents
+  - Frontend ZIP export modal and download integration in Workspace and Project Details views
+
+- **Phase 9: Dashboard & Project History** — Planned Next

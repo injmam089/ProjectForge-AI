@@ -20,6 +20,9 @@ import com.projectforge.service.DocumentWorkspaceService;
 import com.projectforge.service.ProjectRequirementsService;
 import com.projectforge.service.ProjectService;
 import jakarta.validation.Valid;
+import com.projectforge.dto.ExportResponse;
+import com.projectforge.export.ExportService;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -48,13 +51,14 @@ public class ProjectController {
     private final ProjectRequirementsService projectRequirementsService;
     private final DocumentGenerationService documentGenerationService;
     private final DocumentWorkspaceService documentWorkspaceService;
+    private final ExportService exportService;
 
     public ProjectController(ProjectService projectService) {
-        this(projectService, null, null, null);
+        this(projectService, null, null, null, null);
     }
 
     public ProjectController(ProjectService projectService, ProjectRequirementsService projectRequirementsService) {
-        this(projectService, projectRequirementsService, null, null);
+        this(projectService, projectRequirementsService, null, null, null);
     }
 
     public ProjectController(
@@ -62,7 +66,16 @@ public class ProjectController {
             ProjectRequirementsService projectRequirementsService,
             DocumentGenerationService documentGenerationService
     ) {
-        this(projectService, projectRequirementsService, documentGenerationService, null);
+        this(projectService, projectRequirementsService, documentGenerationService, null, null);
+    }
+
+    public ProjectController(
+            ProjectService projectService,
+            ProjectRequirementsService projectRequirementsService,
+            DocumentGenerationService documentGenerationService,
+            DocumentWorkspaceService documentWorkspaceService
+    ) {
+        this(projectService, projectRequirementsService, documentGenerationService, documentWorkspaceService, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -70,12 +83,14 @@ public class ProjectController {
             ProjectService projectService,
             ProjectRequirementsService projectRequirementsService,
             DocumentGenerationService documentGenerationService,
-            DocumentWorkspaceService documentWorkspaceService
+            DocumentWorkspaceService documentWorkspaceService,
+            ExportService exportService
     ) {
         this.projectService = projectService;
         this.projectRequirementsService = projectRequirementsService;
         this.documentGenerationService = documentGenerationService;
         this.documentWorkspaceService = documentWorkspaceService;
+        this.exportService = exportService;
     }
 
     /**
@@ -284,5 +299,44 @@ public class ProjectController {
     ) {
         WorkspaceResponse response = documentWorkspaceService.getWorkspace(id, userDetails.getUsername());
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Prepares export metadata for an owned project.
+     */
+    @PostMapping("/{id}/export")
+    public ResponseEntity<ExportResponse> prepareExport(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        ExportResponse response = exportService.prepareExport(id, userDetails.getUsername());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Downloads finalized project Markdown documentation as a secure ZIP package.
+     */
+    @GetMapping("/{id}/export/download")
+    public ResponseEntity<byte[]> downloadExport(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        ExportService.ExportPackage exportPackage = exportService.generateExportPackage(id, userDetails.getUsername());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + exportPackage.filename() + "\"")
+                .header(HttpHeaders.CONTENT_TYPE, "application/zip")
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(exportPackage.content().length))
+                .body(exportPackage.content());
+    }
+
+    /**
+     * Convenience endpoint for direct GET /api/projects/{id}/export download.
+     */
+    @GetMapping("/{id}/export")
+    public ResponseEntity<byte[]> exportDirect(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        return downloadExport(id, userDetails);
     }
 }

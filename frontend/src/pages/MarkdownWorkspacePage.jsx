@@ -14,14 +14,17 @@ import {
   Columns,
   Eye,
   Edit3,
+  Archive,
 } from 'lucide-react';
 import { documentService } from '../services/documentService';
+import { exportService } from '../services/exportService';
 import { DocumentSidebar } from '../components/workspace/DocumentSidebar';
 import { MarkdownEditor } from '../components/workspace/MarkdownEditor';
 import { MarkdownPreview } from '../components/workspace/MarkdownPreview';
 import { AiDocumentEditPanel } from '../components/workspace/AiDocumentEditPanel';
 import { DocumentVersionHistory } from '../components/workspace/DocumentVersionHistory';
 import { VersionPreviewModal } from '../components/workspace/VersionPreviewModal';
+import { ExportZipModal } from '../components/workspace/ExportZipModal';
 
 export function MarkdownWorkspacePage() {
   const { id: projectId } = useParams();
@@ -58,6 +61,13 @@ export function MarkdownWorkspacePage() {
   const [showRegenerateModal, setShowRegenerateModal] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [pendingDocSwitchId, setPendingDocSwitchId] = useState(null);
+
+  // Phase 8 ZIP Export State
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportStatusMessage, setExportStatusMessage] = useState('');
+  const [exportError, setExportError] = useState(null);
+  const [exportSuccess, setExportSuccess] = useState(false);
 
   const selectedDoc = documents.find((d) => d.id === selectedDocId) || null;
   const hasUnsavedChanges = Boolean(selectedDoc && documentContent !== savedContent);
@@ -325,6 +335,42 @@ export function MarkdownWorkspacePage() {
       setError(err.message || 'Failed to restore version.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Phase 8 ZIP Export Handlers
+  const handleOpenExport = () => {
+    setExportError(null);
+    setExportSuccess(false);
+    setExportStatusMessage('');
+    setShowExportModal(true);
+  };
+
+  const handleExecuteExport = async () => {
+    if (exportLoading) return;
+    try {
+      setExportLoading(true);
+      setExportError(null);
+      setExportSuccess(false);
+      setExportStatusMessage('Validating documents & manifest...');
+
+      // 1. Prepare export metadata
+      const meta = await exportService.prepareExport(projectId);
+
+      // 2. Download binary ZIP package
+      setExportStatusMessage('Packaging & downloading ZIP archive...');
+      await exportService.downloadExport(projectId, meta.filename);
+
+      setExportSuccess(true);
+      setExportStatusMessage('Download complete!');
+      setTimeout(() => {
+        setShowExportModal(false);
+        setExportSuccess(false);
+        setExportLoading(false);
+      }, 2000);
+    } catch (err) {
+      setExportError(err.message || 'Failed to export project documentation.');
+      setExportLoading(false);
     }
   };
 
@@ -606,6 +652,25 @@ export function MarkdownWorkspacePage() {
           >
             <Download size={13} />
             <span>Download</span>
+          </button>
+
+          {/* Export Project as ZIP */}
+          <button
+            type="button"
+            onClick={handleOpenExport}
+            className="btn btn-ghost"
+            style={{
+              fontSize: '0.78rem',
+              padding: '6px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              color: '#38bdf8',
+            }}
+            title="Export all project documentation as a secure ZIP package"
+          >
+            <Archive size={13} />
+            <span>Export ZIP</span>
           </button>
 
           {/* Regenerate from Specification */}
@@ -892,6 +957,19 @@ export function MarkdownWorkspacePage() {
           onRestore={(v) => handleRestoreVersion(v)}
         />
       )}
+
+      {/* Phase 8 ZIP Export Modal */}
+      <ExportZipModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        projectName={workspace?.projectName || 'Project'}
+        documentsCount={documents.length}
+        onConfirmExport={handleExecuteExport}
+        loading={exportLoading}
+        statusMessage={exportStatusMessage}
+        error={exportError}
+        success={exportSuccess}
+      />
     </div>
   );
 }

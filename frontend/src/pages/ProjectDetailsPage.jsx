@@ -5,12 +5,14 @@ import {
   CheckCircle2, Clock, Calendar, Tag, Layers, Server, 
   HelpCircle, Send, Database, Code, Activity, RefreshCw,
   Check, Lock, ChevronRight, ShieldCheck, AlertTriangle, Plus,
-  FileText, Eye, BookOpen
+  FileText, Eye, BookOpen, Download
 } from 'lucide-react';
 import { projectService } from '../services/projectService';
 import { authService } from '../services/authService';
+import { exportService } from '../services/exportService';
 import { ApprovalModal } from '../components/ApprovalModal';
 import { DocumentViewerModal } from '../components/DocumentViewerModal';
+import { ExportZipModal } from '../components/workspace/ExportZipModal';
 import { PROJECT_TYPES, DIFFICULTY_LEVELS } from '../utils/constants';
 
 export function ProjectDetailsPage({ initialEdit = false }) {
@@ -51,6 +53,13 @@ export function ProjectDetailsPage({ initialEdit = false }) {
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [docLoading, setDocLoading] = useState(false);
+
+  // Phase 8 ZIP Export State
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportStatusMessage, setExportStatusMessage] = useState('');
+  const [exportError, setExportError] = useState(null);
+  const [exportSuccess, setExportSuccess] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -248,6 +257,32 @@ export function ProjectDetailsPage({ initialEdit = false }) {
       setError(err.message || 'Failed to generate documentation.');
     } finally {
       setIsGeneratingDocs(false);
+    }
+  };
+
+  // Phase 8: Export ZIP Package
+  const handleExportPackage = async () => {
+    setExportLoading(true);
+    setExportError(null);
+    setExportSuccess(false);
+    setExportStatusMessage('Validating export package requirements...');
+
+    try {
+      const prep = await exportService.prepareExport(id);
+      setExportStatusMessage(`Packaging ${prep.documentCount || documents.length} active documents into ZIP...`);
+      await exportService.downloadExport(id, prep.filename || `${project?.name || 'project'}-docs.zip`);
+      setExportStatusMessage('Export package generated and download started!');
+      setExportSuccess(true);
+      setTimeout(() => {
+        setShowExportModal(false);
+        setExportSuccess(false);
+        setExportStatusMessage('');
+      }, 1500);
+    } catch (err) {
+      console.error('Failed to export package', err);
+      setExportError(err.message || 'Export generation failed. Please try again.');
+    } finally {
+      setExportLoading(false);
     }
   };
 
@@ -626,6 +661,19 @@ export function ProjectDetailsPage({ initialEdit = false }) {
               <span>Open Markdown Workspace</span>
             </Link>
             <button
+              onClick={() => {
+                setExportError(null);
+                setExportSuccess(false);
+                setExportStatusMessage('');
+                setShowExportModal(true);
+              }}
+              className="btn btn-secondary"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px' }}
+            >
+              <Download size={15} />
+              <span>Export ZIP</span>
+            </button>
+            <button
               onClick={handleGenerateDocs}
               disabled={isGeneratingDocs}
               className="btn btn-ghost"
@@ -981,6 +1029,19 @@ export function ProjectDetailsPage({ initialEdit = false }) {
                     <Edit3 size={14} />
                     <span>Open Workspace</span>
                   </Link>
+                  <button
+                    onClick={() => {
+                      setExportError(null);
+                      setExportSuccess(false);
+                      setExportStatusMessage('');
+                      setShowExportModal(true);
+                    }}
+                    className="btn btn-secondary"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', padding: '6px 12px' }}
+                  >
+                    <Download size={14} />
+                    <span>Export ZIP</span>
+                  </button>
                   <span className="badge badge-success" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Check size={12} />
                     <span>Verified & Consistent</span>
@@ -1452,6 +1513,21 @@ export function ProjectDetailsPage({ initialEdit = false }) {
         onClose={() => setIsViewerOpen(false)}
         document={selectedDoc}
         loading={docLoading}
+      />
+
+      {/* Phase 8: ZIP Export Package Modal */}
+      <ExportZipModal
+        isOpen={showExportModal}
+        onClose={() => {
+          if (!exportLoading) setShowExportModal(false);
+        }}
+        projectName={project?.name || 'Project'}
+        documentsCount={documents.length}
+        onConfirmExport={handleExportPackage}
+        loading={exportLoading}
+        statusMessage={exportStatusMessage}
+        error={exportError}
+        success={exportSuccess}
       />
     </div>
   );
